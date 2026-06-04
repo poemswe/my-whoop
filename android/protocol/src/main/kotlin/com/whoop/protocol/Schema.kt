@@ -94,7 +94,11 @@ class Schema internal constructor(
     }
 }
 
-private val schemaLazy: Schema by lazy { parseSchema() }
+private val schemaLazy: Schema by lazy {
+    val s = parseSchema()
+    registerPostHooks()
+    s
+}
 
 fun loadSchema(): Schema = schemaLazy
 
