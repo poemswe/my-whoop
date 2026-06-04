@@ -146,11 +146,7 @@ internal fun registerPostHooks() {
                 fb.parsed["battery_mV"] = ParsedValue.IntV(v)
             }
             "REPORT_VERSION_INFO" -> if (pay.size >= 31) {
-                val buf = UByteArray(35)
-                pay.sliceArray(0 until minOf(35, pay.size)).copyInto(buf)
-                fun le32(at: Int): Long =
-                    (buf[at].toLong() or (buf[at + 1].toLong() shl 8) or
-                        (buf[at + 2].toLong() shl 16) or (buf[at + 3].toLong() shl 24)) and 0xFFFFFFFFL
+                fun le32(at: Int): Long = readU32(pay, at) ?: 0L
                 fb.parsed["fw_harvard"] =
                     ParsedValue.StringV("${le32(3)}.${le32(7)}.${le32(11)}.${le32(15)}")
                 fb.parsed["fw_boylston"] =

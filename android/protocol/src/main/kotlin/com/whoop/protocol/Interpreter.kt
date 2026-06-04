@@ -55,7 +55,7 @@ internal fun hex(b: UByteArray, from: Int, until: Int): String {
     return sb.toString()
 }
 
-internal fun hexAll(b: UByteArray): String = hex(b, 0, b.size)
+private fun hexAll(b: UByteArray): String = hex(b, 0, b.size)
 
 class FieldBuilder internal constructor(val frame: UByteArray) {
     val fields: MutableList<DecodedField> = mutableListOf()

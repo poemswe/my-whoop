@@ -52,6 +52,30 @@ class PostHooksTest {
         assertEquals(ParsedValue.IntV(1), f.parsed["battery_charging"])
     }
 
+    @Test fun rawDataUnknownDataLenEmitsRegionWithoutParsedFields() {
+        val payload = UByteArray(40) { 0u }
+        val frame = parseFrame(buildFrame(type = 43u, seq = 0u, payload = payload))
+        assertTrue(frame.ok)
+        assertEquals(null, frame.parsed["heart_rate"])
+        assertEquals(null, frame.parsed["accelX_mean"])
+        assertNotNull(frame.fields.singleOrNull { it.name.startsWith("sensor payload") })
+    }
+
+    @Test fun eventBatteryLevelMvBoundaries() {
+        fun mv(value: Int): ParsedValue? {
+            val payload = payloadAt(
+                size = 22,
+                6 to ubyteArrayOf(3u),
+                21 to u16LE(value),
+            )
+            return parseFrame(buildFrame(type = 48u, seq = 0u, payload = payload)).parsed["battery_mV"]
+        }
+        assertEquals(null, mv(2999))
+        assertEquals(ParsedValue.IntV(3000), mv(3000))
+        assertEquals(ParsedValue.IntV(4300), mv(4300))
+        assertEquals(null, mv(4301))
+    }
+
     @Test fun eventBatteryLevelClampsSocOutOfRange() {
         val payload = payloadAt(
             size = 22,

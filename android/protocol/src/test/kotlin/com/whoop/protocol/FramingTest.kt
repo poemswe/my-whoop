@@ -83,6 +83,16 @@ class FramingTest {
         assertContentEquals(frame, out[0])
     }
 
+    @Test fun reassemblerHandlesSofInSecondFragment() {
+        val frame = frameFromPayload(ubyteArrayOf(0x01u, 0x02u, 0x03u), type = 40u)
+        val noise = ubyteArrayOf(0xDEu, 0xADu, 0xBEu, 0xEFu)
+        val r = Reassembler()
+        assertEquals(0, r.feed(noise).size)
+        val out = r.feed(frame)
+        assertEquals(1, out.size)
+        assertContentEquals(frame, out[0])
+    }
+
     private fun assertContentEquals(expected: UByteArray, actual: UByteArray) {
         assertEquals(expected.toList(), actual.toList())
     }
