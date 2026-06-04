@@ -48,10 +48,10 @@ data class FrameCheck(
     val crc32OK: Boolean? = null,
 )
 
-private fun u16le(b: UByteArray, off: Int): Int =
+internal fun u16le(b: UByteArray, off: Int): Int =
     b[off].toInt() or (b[off + 1].toInt() shl 8)
 
-private fun u32le(b: UByteArray, off: Int): UInt =
+internal fun u32le(b: UByteArray, off: Int): UInt =
     b[off].toUInt() or (b[off + 1].toUInt() shl 8) or
         (b[off + 2].toUInt() shl 16) or (b[off + 3].toUInt() shl 24)
 
