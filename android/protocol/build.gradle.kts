@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.1.0"
+    kotlin("plugin.serialization") version "2.1.0"
 }
 
 kotlin {
@@ -12,6 +13,9 @@ kotlin {
 sourceSets {
     main {
         resources.srcDir(rootProject.file("../protocol"))
+    }
+    test {
+        resources.srcDir(rootProject.file("../Packages/WhoopProtocol/Tests/WhoopProtocolTests/Resources"))
     }
 }
 

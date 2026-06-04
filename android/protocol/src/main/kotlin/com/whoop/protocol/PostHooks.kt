@@ -15,12 +15,12 @@ private fun s24(f: UByteArray, off: Int): Int? {
 
 private fun f32(f: UByteArray, off: Int): Double? {
     val bits = readU32(f, off) ?: return null
-    return Float.fromBits(bits).toDouble()
+    return Float.fromBits(bits.toInt()).toDouble()
 }
 
-private fun readHistInt(f: UByteArray, off: Int, dtype: String): Int? = when (dtype) {
-    "u8" -> readU8(f, off)
-    "u16" -> readU16(f, off)
+private fun readHistInt(f: UByteArray, off: Int, dtype: String): Long? = when (dtype) {
+    "u8" -> readU8(f, off)?.toLong()
+    "u16" -> readU16(f, off)?.toLong()
     "u32" -> readU32(f, off)
     else -> null
 }
@@ -137,9 +137,9 @@ internal fun registerPostHooks() {
                 fb.parsed["battery_pct"] = ParsedValue.DoubleV(v / 10.0)
             }
             "GET_CLOCK" -> if (pay.size >= 6) {
-                val v = pay[2].toInt() or (pay[3].toInt() shl 8) or
-                    (pay[4].toInt() shl 16) or (pay[5].toInt() shl 24)
-                fb.parsed["clock"] = ParsedValue.IntV(v)
+                val v = (pay[2].toLong() or (pay[3].toLong() shl 8) or
+                    (pay[4].toLong() shl 16) or (pay[5].toLong() shl 24)) and 0xFFFFFFFFL
+                fb.parsed["clock"] = intOrDoubleV(v)
             }
             "GET_EXTENDED_BATTERY_INFO" -> if (pay.size >= 9) {
                 val v = pay[7].toInt() or (pay[8].toInt() shl 8)
@@ -258,8 +258,8 @@ internal fun registerPostHooks() {
             val value: ParsedValue = when (dtype) {
                 "u8", "u16", "u32" -> {
                     val v = readHistInt(frame, fld.off, dtype) ?: continue
-                    fld.enumRef?.let { ParsedValue.StringV(schema.enumName(it, v)) }
-                        ?: ParsedValue.IntV(v)
+                    fld.enumRef?.let { ParsedValue.StringV(schema.enumName(it, v.toInt())) }
+                        ?: intOrDoubleV(v)
                 }
                 "f32" -> ParsedValue.DoubleV(f32(frame, fld.off) ?: continue)
                 else -> continue
@@ -293,10 +293,10 @@ internal fun registerPostHooks() {
                 (pay[8].toLong() shl 16) or (pay[9].toLong() shl 24)) and 0xFFFFFFFFL
             val trim = (pay[10].toLong() or (pay[11].toLong() shl 8) or
                 (pay[12].toLong() shl 16) or (pay[13].toLong() shl 24)) and 0xFFFFFFFFL
-            fb.add(7, 4, "unix", "time", ParsedValue.IntV(unix.toInt()))
+            fb.add(7, 4, "unix", "time", intOrDoubleV(unix))
             fb.add(11, 2, "subsec", "time", ParsedValue.IntV(ss))
-            fb.add(13, 4, "unk0", "meta", ParsedValue.IntV(unk0.toInt()))
-            fb.add(17, 4, "trim_cursor", "meta", ParsedValue.IntV(trim.toInt()),
+            fb.add(13, 4, "unk0", "meta", intOrDoubleV(unk0))
+            fb.add(17, 4, "trim_cursor", "meta", intOrDoubleV(trim),
                 note = "ack with this to advance")
         }
     }

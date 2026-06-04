@@ -28,10 +28,10 @@ internal fun readU8(f: UByteArray, off: Int): Int? =
 internal fun readU16(f: UByteArray, off: Int): Int? =
     if (off + 2 <= f.size) f[off].toInt() or (f[off + 1].toInt() shl 8) else null
 
-internal fun readU32(f: UByteArray, off: Int): Int? {
+internal fun readU32(f: UByteArray, off: Int): Long? {
     if (off + 4 > f.size) return null
-    return f[off].toInt() or (f[off + 1].toInt() shl 8) or
-        (f[off + 2].toInt() shl 16) or (f[off + 3].toInt() shl 24)
+    return (f[off].toLong() or (f[off + 1].toLong() shl 8) or
+        (f[off + 2].toLong() shl 16) or (f[off + 3].toLong() shl 24)) and 0xFFFFFFFFL
 }
 
 internal fun readI16(f: UByteArray, off: Int): Int? {
@@ -40,11 +40,11 @@ internal fun readI16(f: UByteArray, off: Int): Int? {
     return raw.toShort().toInt()
 }
 
-private fun readDType(f: UByteArray, off: Int, dtype: String): Int? = when (dtype) {
-    "u8" -> readU8(f, off)
-    "u16" -> readU16(f, off)
+private fun readDType(f: UByteArray, off: Int, dtype: String): Long? = when (dtype) {
+    "u8" -> readU8(f, off)?.toLong()
+    "u16" -> readU16(f, off)?.toLong()
     "u32" -> readU32(f, off)
-    "i16" -> readI16(f, off)
+    "i16" -> readI16(f, off)?.toLong()
     else -> null
 }
 
@@ -120,8 +120,8 @@ fun parseFrame(frame: UByteArray): ParsedFrame {
         for (fld in spec.fields) {
             val dtype = fld.dtype ?: continue
             val v = readDType(frame, fld.off, dtype) ?: continue
-            val value = fld.enumRef?.let { ParsedValue.StringV(schema.enumName(it, v)) }
-                ?: ParsedValue.IntV(v)
+            val value = fld.enumRef?.let { ParsedValue.StringV(schema.enumName(it, v.toInt())) }
+                ?: intOrDoubleV(v)
             fb.add(fld.off, fld.len, fld.name, fld.cat, value, fld.note)
         }
         spec.post?.let { postHooks[it] }?.invoke(fb, frame, length, schema)

@@ -14,8 +14,8 @@ fun classifyHistoricalMeta(p: ParsedFrame): HistoricalMeta {
         metaName.startsWith("HISTORY_START") -> HistoricalMeta.Start
         metaName.startsWith("HISTORY_COMPLETE") -> HistoricalMeta.Complete
         metaName.startsWith("HISTORY_END") -> {
-            val unix = p.parsed["unix"]?.intValue ?: return HistoricalMeta.Other
-            val trim = p.parsed["trim_cursor"]?.intValue ?: return HistoricalMeta.Other
+            val unix = p.parsed["unix"]?.longValue ?: return HistoricalMeta.Other
+            val trim = p.parsed["trim_cursor"]?.longValue ?: return HistoricalMeta.Other
             HistoricalMeta.End(unix = unix.toUInt(), trim = trim.toUInt())
         }
         else -> HistoricalMeta.Other
