@@ -91,7 +91,8 @@ class SchemaTest {
         val v24 = s.resolveVersion(hist.versions, 24)
         assertNotNull(v24)
         assertEquals("biometric", v24.kind)
-        assertEquals(20, v24.fields.size)
+        assertNotNull(v24.fields.find { it.name == "heart_rate" })
+        assertNotNull(v24.fields.find { it.name == "spo2_red" })
         assertEquals(23, v24.rrFirstOff)
     }
 

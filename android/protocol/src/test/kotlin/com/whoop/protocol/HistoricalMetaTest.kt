@@ -23,6 +23,13 @@ class HistoricalMetaTest {
         assertEquals(HistoricalMeta.End(unix = 1_700_000_000u, trim = 0xCAFEBABEu), result)
     }
 
+    @Test fun endMetaTypeSurvivesPostY2038Unix() {
+        val payload = u32LE(0xFFEEDDCC.toInt()) + u16LE(0) +
+            u32LE(0) + u32LE(0x01020304)
+        val result = classifyHistoricalMeta(metaFrame(2u, payload))
+        assertEquals(HistoricalMeta.End(unix = 0xFFEEDDCCu, trim = 0x01020304u), result)
+    }
+
     @Test fun endWithoutPayloadFallsBackToOther() {
         assertEquals(HistoricalMeta.Other, classifyHistoricalMeta(metaFrame(2u)))
     }

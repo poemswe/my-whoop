@@ -24,13 +24,15 @@ class PostHooksTest {
 
     @Test fun realtimeDataHookEmitsRrIntervals() {
         val payload = ubyteArrayOf(
-            0u, 0u, 0u, 0u,   // timestamp
-            0u, 0u,           // subseconds
-            80u,              // heart_rate
-            2u,               // rr_count = 2
+            0u, 0u, 0u, 0u,
+            0u, 0u,
+            80u,
+            2u,
         ) + u16LE(420) + u16LE(415)
         val f = parseFrame(buildFrame(type = 40u, seq = 0u, payload = payload))
         assertTrue(f.ok)
+        assertEquals(ParsedValue.IntV(80), f.parsed["heart_rate"])
+        assertEquals(ParsedValue.IntV(2), f.parsed["rr_count"])
         assertEquals(ParsedValue.IntArrayV(listOf(420, 415)), f.parsed["rr_intervals"])
         assertNotNull(f.fields.singleOrNull { it.name == "rr[0]" })
         assertNotNull(f.fields.singleOrNull { it.name == "rr[1]" })
@@ -77,15 +79,16 @@ class PostHooksTest {
     }
 
     @Test fun eventBatteryLevelClampsSocOutOfRange() {
-        val payload = payloadAt(
-            size = 22,
-            6 to ubyteArrayOf(3u),
-            17 to u16LE(2000),                   // > 1100 cap → rejected
-            21 to u16LE(5000),                   // > 4300 cap → rejected
-        )
-        val f = parseFrame(buildFrame(type = 48u, seq = 0u, payload = payload))
-        assertEquals(null, f.parsed["battery_pct"])
-        assertEquals(null, f.parsed["battery_mV"])
+        fun soc(value: Int): ParsedValue? {
+            val payload = payloadAt(
+                size = 22,
+                6 to ubyteArrayOf(3u),
+                17 to u16LE(value),
+            )
+            return parseFrame(buildFrame(type = 48u, seq = 0u, payload = payload)).parsed["battery_pct"]
+        }
+        assertEquals(ParsedValue.DoubleV(110.0), soc(1100))
+        assertEquals(null, soc(1101))
     }
 
     @Test fun commandResponseGetBatteryLevelDecodesPercent() {

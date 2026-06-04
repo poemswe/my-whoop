@@ -137,9 +137,7 @@ internal fun registerPostHooks() {
                 fb.parsed["battery_pct"] = ParsedValue.DoubleV(v / 10.0)
             }
             "GET_CLOCK" -> if (pay.size >= 6) {
-                val v = (pay[2].toLong() or (pay[3].toLong() shl 8) or
-                    (pay[4].toLong() shl 16) or (pay[5].toLong() shl 24)) and 0xFFFFFFFFL
-                fb.parsed["clock"] = intOrDoubleV(v)
+                fb.parsed["clock"] = intOrDoubleV(u32le(pay, 2).toLong())
             }
             "GET_EXTENDED_BATTERY_INFO" -> if (pay.size >= 9) {
                 val v = pay[7].toInt() or (pay[8].toInt() shl 8)
@@ -156,8 +154,7 @@ internal fun registerPostHooks() {
                 val uniq = mutableListOf<Long>()
                 var o = 3
                 while (o < pay.size - 3) {
-                    val v = (pay[o].toLong() or (pay[o + 1].toLong() shl 8) or
-                        (pay[o + 2].toLong() shl 16) or (pay[o + 3].toLong() shl 24)) and 0xFFFFFFFFL
+                    val v = u32le(pay, o).toLong()
                     if (v in 1_600_000_000L..1_800_000_000L && v !in uniq) uniq.add(v)
                     o += 1
                 }
@@ -282,17 +279,11 @@ internal fun registerPostHooks() {
         if (7 >= payEnd) return@hook
         val pay = frame.sliceArray(7 until payEnd)
         if (pay.size >= 14) {
-            val unix = (pay[0].toLong() or (pay[1].toLong() shl 8) or
-                (pay[2].toLong() shl 16) or (pay[3].toLong() shl 24)) and 0xFFFFFFFFL
             val ss = pay[4].toInt() or (pay[5].toInt() shl 8)
-            val unk0 = (pay[6].toLong() or (pay[7].toLong() shl 8) or
-                (pay[8].toLong() shl 16) or (pay[9].toLong() shl 24)) and 0xFFFFFFFFL
-            val trim = (pay[10].toLong() or (pay[11].toLong() shl 8) or
-                (pay[12].toLong() shl 16) or (pay[13].toLong() shl 24)) and 0xFFFFFFFFL
-            fb.add(7, 4, "unix", "time", intOrDoubleV(unix))
+            fb.add(7, 4, "unix", "time", intOrDoubleV(u32le(pay, 0).toLong()))
             fb.add(11, 2, "subsec", "time", ParsedValue.IntV(ss))
-            fb.add(13, 4, "unk0", "meta", intOrDoubleV(unk0))
-            fb.add(17, 4, "trim_cursor", "meta", intOrDoubleV(trim),
+            fb.add(13, 4, "unk0", "meta", intOrDoubleV(u32le(pay, 6).toLong()))
+            fb.add(17, 4, "trim_cursor", "meta", intOrDoubleV(u32le(pay, 10).toLong()),
                 note = "ack with this to advance")
         }
     }

@@ -104,6 +104,10 @@ class Reassembler {
             }
             if (sof > 0) buf = buf.sliceArray(sof until buf.size)
             if (buf.size < 4) break
+            if (crc8(ubyteArrayOf(buf[1], buf[2])) != buf[3]) {
+                buf = buf.sliceArray(1 until buf.size)
+                continue
+            }
             val total = (buf[1].toInt() or (buf[2].toInt() shl 8)) + 4
             if (buf.size < total) break
             out.add(buf.sliceArray(0 until total))

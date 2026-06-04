@@ -51,15 +51,15 @@ class FramingTest {
     }
 
     @Test fun reassemblerEmitsCompleteFrameInOneFeed() {
-        val frame = frameFromPayload(ubyteArrayOf(0x01u, 0x02u), type = 40u)
+        val frame = buildFrame(type = 40u, seq = 0u, payload = ubyteArrayOf(0x01u, 0x02u))
         val out = Reassembler().feed(frame)
         assertEquals(1, out.size)
         assertContentEquals(frame, out[0])
     }
 
     @Test fun reassemblerEmitsBothWhenTwoFramesConcatenated() {
-        val a = frameFromPayload(ubyteArrayOf(0xAAu), type = 40u, seq = 1u)
-        val b = frameFromPayload(ubyteArrayOf(0xBBu, 0xCCu), type = 47u, seq = 2u)
+        val a = buildFrame(type = 40u, seq = 1u, payload = ubyteArrayOf(0xAAu))
+        val b = buildFrame(type = 47u, seq = 2u, payload = ubyteArrayOf(0xBBu, 0xCCu))
         val out = Reassembler().feed(a + b)
         assertEquals(2, out.size)
         assertContentEquals(a, out[0])
@@ -67,7 +67,7 @@ class FramingTest {
     }
 
     @Test fun reassemblerStitchesFragmentsAcrossFeeds() {
-        val frame = frameFromPayload(ubyteArrayOf(0x10u, 0x20u, 0x30u, 0x40u), type = 40u)
+        val frame = buildFrame(type = 40u, seq = 0u, payload = ubyteArrayOf(0x10u, 0x20u, 0x30u, 0x40u))
         val r = Reassembler()
         assertEquals(0, r.feed(frame.sliceArray(0 until 5)).size)
         val out = r.feed(frame.sliceArray(5 until frame.size))
@@ -76,15 +76,23 @@ class FramingTest {
     }
 
     @Test fun reassemblerDropsGarbageBeforeSof() {
-        val frame = frameFromPayload(ubyteArrayOf(0x99u), type = 40u)
+        val frame = buildFrame(type = 40u, seq = 0u, payload = ubyteArrayOf(0x99u))
         val noise = ubyteArrayOf(0x00u, 0x11u, 0x22u, 0x33u)
         val out = Reassembler().feed(noise + frame)
         assertEquals(1, out.size)
         assertContentEquals(frame, out[0])
     }
 
+    @Test fun reassemblerSlidesPastFalseSofWithBadCrc8() {
+        val noise = ubyteArrayOf(0xAAu, 0xFFu, 0xFFu, 0x00u, 0xAAu, 0x00u)
+        val frame = buildFrame(type = 40u, seq = 0u, payload = ubyteArrayOf(0x07u))
+        val out = Reassembler().feed(noise + frame)
+        assertEquals(1, out.size)
+        assertContentEquals(frame, out[0])
+    }
+
     @Test fun reassemblerHandlesSofInSecondFragment() {
-        val frame = frameFromPayload(ubyteArrayOf(0x01u, 0x02u, 0x03u), type = 40u)
+        val frame = buildFrame(type = 40u, seq = 0u, payload = ubyteArrayOf(0x01u, 0x02u, 0x03u))
         val noise = ubyteArrayOf(0xDEu, 0xADu, 0xBEu, 0xEFu)
         val r = Reassembler()
         assertEquals(0, r.feed(noise).size)

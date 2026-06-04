@@ -55,7 +55,6 @@ internal fun hex(b: UByteArray, from: Int, until: Int): String {
     return sb.toString()
 }
 
-private fun hexAll(b: UByteArray): String = hex(b, 0, b.size)
 
 class FieldBuilder internal constructor(val frame: UByteArray) {
     val fields: MutableList<DecodedField> = mutableListOf()
@@ -88,7 +87,7 @@ typealias PostHook = (FieldBuilder, UByteArray, Int?, Schema) -> Unit
 internal val postHooks: MutableMap<String, PostHook> = mutableMapOf()
 
 fun parseFrame(frame: UByteArray): ParsedFrame {
-    val rawHex = hexAll(frame)
+    val rawHex = hex(frame, 0, frame.size)
     if (frame.size < 8 || frame[0] != 0xAAu.toUByte()) {
         return ParsedFrame(
             ok = false, typeName = "INVALID/FRAGMENT", seq = null, cmdName = null,
