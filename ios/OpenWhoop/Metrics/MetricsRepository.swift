@@ -111,11 +111,15 @@ final class MetricsRepository: ObservableObject {
         fmt.timeZone = TimeZone(identifier: "UTC")
         fmt.dateFormat = "yyyy-MM-dd"
 
-        // Fetch last 14 days of daily metrics; take the most-recent (last) row.
+        // Fetch last 14 days of daily metrics. Prefer the most-recent row that has a
+        // completed sleep session (totalSleepMin > 0); fall back to the absolute last row
+        // so stub rows for the new UTC day (which roll over ~8pm EDT) don't displace
+        // today's recovery/sleep data before tonight's sleep is attributed.
         if let start = cal.date(byAdding: .day, value: -14, to: now) {
             let fromDay = fmt.string(from: start)
             let toDay = fmt.string(from: now)
-            today = (try? await store.dailyMetrics(deviceId: deviceId, from: fromDay, to: toDay))?.last
+            let rows = (try? await store.dailyMetrics(deviceId: deviceId, from: fromDay, to: toDay)) ?? []
+            today = rows.last(where: { ($0.totalSleepMin ?? 0) > 0 }) ?? rows.last
         }
 
         // Fetch last 14 days of sleep sessions; take the most-recent (last) row.
