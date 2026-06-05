@@ -538,6 +538,18 @@ final class ServerSync {
     /// POST /v1/backfill-workouts {device, from, to} (YYYY-MM-DD UTC).
     /// Asks the server to recompute exercise sessions + calorie estimates over the given date range.
     /// Returns true on 2xx, false on any network or server error — callers treat this as best-effort.
+    /// Trigger server recompute for today's UTC date, then pull the result into cache.
+    func computeToday() async -> Bool {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withFullDate]
+        let today = fmt.string(from: Date())
+        let body: [String: Any] = ["device": deviceId, "date": today]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else { return false }
+        let ok = await post(path: "/v1/compute-daily", body: bodyData)
+        if ok { await pullDerived() }
+        return ok
+    }
+
     func backfillWorkouts(from: String, to: String) async -> Bool {
         let body: [String: Any] = ["device": deviceId, "from": from, "to": to]
         guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else { return false }

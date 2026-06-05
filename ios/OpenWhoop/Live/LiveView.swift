@@ -35,6 +35,7 @@ private struct LiveContentView: View {
     var metrics: MetricsRepository
 
     @State private var showingSettings = false
+    @State private var isComputingToday = false
 
     /// Research toggle, backed by the same UserDefaults key BLEManager.bootstrapStore() reads.
     /// Default false → decoded-only. bootstrapStore() reads this once when it builds the
@@ -162,8 +163,21 @@ private struct LiveContentView: View {
                                    ?? WH.Color.textSecondary)
                 }
 
-                // Sync-freshness row
-                syncFreshnessRow
+                // Sync-freshness row + manual server recompute
+                HStack {
+                    syncFreshnessRow
+                    Spacer()
+                    consoleButton(isComputingToday ? "…" : "Recompute",
+                                  icon: "arrow.clockwise.icloud",
+                                  accent: WH.Color.strainBlue, prominent: false) {
+                        guard !isComputingToday else { return }
+                        isComputingToday = true
+                        Task {
+                            await metrics.computeToday()
+                            isComputingToday = false
+                        }
+                    }
+                }
 
                 // Storage summary
                 Text(model.storageSummary)

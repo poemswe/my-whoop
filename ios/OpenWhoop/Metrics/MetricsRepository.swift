@@ -271,6 +271,11 @@ final class MetricsRepository: ObservableObject {
     /// Fire-and-forget: the caller should not await a meaningful result; returns false silently if
     /// unconfigured or the request fails. Never throws.
     @discardableResult
+    func computeToday() async -> Bool {
+        await ensureOpen()
+        return await serverSync?.computeToday() ?? false
+    }
+
     func backfillWorkouts(from: String, to: String) async -> Bool {
         await ensureOpen()
         return await serverSync?.backfillWorkouts(from: from, to: to) ?? false
