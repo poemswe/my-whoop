@@ -69,7 +69,9 @@ public final class BLEManager: NSObject, ObservableObject {
     static let backfillLastAtKey = "backfillLastAt"
     /// Prevents a second backfill from starting on a same-process reconnect to the same strap.
     private var backfillStarted = false
-    /// Tracks whether we entered high-freq-sync mode for the current offload, so we exit it cleanly.
+    /// True between ENTER_HIGH_FREQ_SYNC and the matching EXIT in exitBackfilling — so we only
+    /// send EXIT when we actually sent ENTER (otherwise EXIT is a no-op on this firmware anyway,
+    /// but the symmetry keeps the strap state machine clean).
     private var highFreqSyncActive = false
     /// Runs the connect handshake EXACTLY ONCE per connection. `didWriteValueFor` re-fires on every
     /// `.withResponse` write (the bond write, every SEND_HISTORICAL, every HISTORY_END ack); without
@@ -277,16 +279,14 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         backfiller.begin()
         backfilling = true
-        // High-freq-sync path: some strap firmware revisions (observed on Poe's WHOOP 4.0) respond
-        // to plain SEND_HISTORICAL_DATA with CONSOLE_LOGS (type 50) instead of type-47 records.
-        // Sending ENTER_HIGH_FREQ_SYNC first causes those straps to serve the historical store.
-        // This is gated behind a UserDefaults flag (default off) — do NOT enable by default; the
-        // original firmware revision serves type-47 without it and enabling it there is untested.
-        // Read each call (not once at init) so toggling takes effect on the next sync without relaunch.
+        // Some WHOOP 4.0 firmware revisions return CONSOLE_LOGS (type-50) instead of type-47 for
+        // plain SEND_HISTORICAL_DATA; ENTER_HIGH_FREQ_SYNC first makes those straps serve the
+        // historical store. Off by default — the original revision serves type-47 without it and
+        // the ENTER path is untested there. Flag is read per-call so the toggle applies next sync.
         if UserDefaults.standard.bool(forKey: "useHighFreqBackfill") {
             send(.enterHighFreqSync, payload: [0x00])
             highFreqSyncActive = true
-            log("Backfill: entering high-freq-sync mode (useHighFreqBackfill=true)")
+            log("Backfill: entering high-freq-sync mode")
         }
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
         // [0x00] (empty → 0 frames on a clean stable link with ~2k records pending); the Mac ground-truth
