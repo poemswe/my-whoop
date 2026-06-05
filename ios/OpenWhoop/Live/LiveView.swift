@@ -42,6 +42,12 @@ private struct LiveContentView: View {
     /// so a change here applies on the next app launch.
     @AppStorage("enableRawCapture") private var enableRawCapture = false
 
+    /// Default false → plain SEND_HISTORICAL_DATA (works on the original firmware revision).
+    /// Enable on strap firmware that returns CONSOLE_LOGS instead of type-47 records: this
+    /// sends ENTER_HIGH_FREQ_SYNC before SEND_HISTORICAL_DATA, which causes those straps to
+    /// serve the historical store. Takes effect on the next backfill (no relaunch needed).
+    @AppStorage("useHighFreqBackfill") private var useHighFreqBackfill = false
+
     /// Haptics playground state. patternId indexes the device's preset patterns (the strap reports
     /// 7 via GET_ALL_HAPTICS_PATTERN); the official app fires id 2, so that's the default. loops = repeats.
     @State private var hapticPattern = 2
@@ -422,6 +428,18 @@ private struct LiveContentView: View {
 
                 Text("Off = decoded-only (default). On captures raw frames locally for RE; "
                      + "takes effect on next launch.")
+                    .font(WH.Font.caption)
+                    .foregroundStyle(WH.Color.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().background(WH.Color.textSecondary.opacity(0.3))
+
+                Toggle("High-freq-sync backfill", isOn: $useHighFreqBackfill)
+                    .tint(WH.Color.strainBlue)
+                    .foregroundStyle(WH.Color.textPrimary)
+
+                Text("Enable if your strap returns CONSOLE_LOGS instead of historical data. "
+                     + "Sends ENTER_HIGH_FREQ_SYNC before each offload. Takes effect on next sync.")
                     .font(WH.Font.caption)
                     .foregroundStyle(WH.Color.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

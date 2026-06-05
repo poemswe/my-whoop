@@ -69,6 +69,8 @@ public final class BLEManager: NSObject, ObservableObject {
     static let backfillLastAtKey = "backfillLastAt"
     /// Prevents a second backfill from starting on a same-process reconnect to the same strap.
     private var backfillStarted = false
+    /// Tracks whether we entered high-freq-sync mode for the current offload, so we exit it cleanly.
+    private var highFreqSyncActive = false
     /// Runs the connect handshake EXACTLY ONCE per connection. `didWriteValueFor` re-fires on every
     /// `.withResponse` write (the bond write, every SEND_HISTORICAL, every HISTORY_END ack); without
     /// this guard those re-entries re-blasted hello/SET_CLOCK at the strap mid-offload and stopped it
@@ -275,10 +277,19 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         backfiller.begin()
         backfilling = true
+        // High-freq-sync path: some strap firmware revisions (observed on Poe's WHOOP 4.0) respond
+        // to plain SEND_HISTORICAL_DATA with CONSOLE_LOGS (type 50) instead of type-47 records.
+        // Sending ENTER_HIGH_FREQ_SYNC first causes those straps to serve the historical store.
+        // This is gated behind a UserDefaults flag (default off) — do NOT enable by default; the
+        // original firmware revision serves type-47 without it and enabling it there is untested.
+        if UserDefaults.standard.bool(forKey: "useHighFreqBackfill") {
+            send(.enterHighFreqSync, payload: [0x00])
+            highFreqSyncActive = true
+            log("Backfill: entering high-freq-sync mode (useHighFreqBackfill=true)")
+        }
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
         // [0x00] (empty → 0 frames on a clean stable link with ~2k records pending); the Mac ground-truth
-        // offload (re/sync_openwhoop.py, re/diagnose_biometrics.py) uses [0x00] too. Plain offload — the
-        // strap streams HISTORY_START → type-47 records → HISTORY_END (acked) … → HISTORY_COMPLETE.
+        // offload (re/sync_openwhoop.py, re/diagnose_biometrics.py) uses [0x00] too.
         send(.sendHistoricalData, payload: [0x00], writeType: .withResponse)
         armBackfillTimeout()
         log("Backfill: session started — historical offload requested")
@@ -349,6 +360,10 @@ public final class BLEManager: NSObject, ObservableObject {
         backfillTimeout?.cancel()
         backfillTimeout = nil
         backfillFrameQueue.removeAll()
+        if highFreqSyncActive {
+            send(.exitHighFreqSync, payload: [0x00])
+            highFreqSyncActive = false
+        }
         log("Backfill: session ended — reason=\(reason)")
         uploadOpportunistically()
         // Read-path sync runs AFTER the offload, never concurrently with it — the offload and the
@@ -599,6 +614,7 @@ extension BLEManager: CBCentralManagerDelegate {
         // Reset backfill state so the next connect starts a fresh offload.
         backfillStarted = false
         backfilling = false
+        highFreqSyncActive = false
         backfillTimeout?.cancel()
         backfillTimeout = nil
         backfillFrameQueue.removeAll()
