@@ -42,10 +42,9 @@ private struct LiveContentView: View {
     /// so a change here applies on the next app launch.
     @AppStorage("enableRawCapture") private var enableRawCapture = false
 
-    /// Default false → plain SEND_HISTORICAL_DATA (works on the original firmware revision).
-    /// Enable on strap firmware that returns CONSOLE_LOGS instead of type-47 records: this
-    /// sends ENTER_HIGH_FREQ_SYNC before SEND_HISTORICAL_DATA, which causes those straps to
-    /// serve the historical store. Takes effect on the next backfill (no relaunch needed).
+    /// Default false → plain SEND_HISTORICAL_DATA. BLEManager.beginBackfill reads this per-call,
+    /// so the toggle takes effect on the next backfill (no relaunch needed). See beginBackfill
+    /// for the firmware-divergence rationale.
     @AppStorage("useHighFreqBackfill") private var useHighFreqBackfill = false
 
     /// Haptics playground state. patternId indexes the device's preset patterns (the strap reports
