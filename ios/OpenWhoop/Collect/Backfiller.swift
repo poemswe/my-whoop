@@ -130,6 +130,14 @@ final class Backfiller {
             // truly required to map REALTIME (type-40/43) device-epoch timestamps, never in a hist chunk.
             let ref = clockRef ?? { let now = Int(Date().timeIntervalSince1970); return ClockRef(device: now, wall: now) }()
             let parsed = frames.map { parseFrame($0) }
+
+            // Safety: if the chunk contains NO type-47 HISTORICAL_DATA frames, the strap is in
+            // CONSOLE_LOGS mode and delivered no usable biometric data. Do NOT ack — the trim
+            // must not advance or those records are permanently deleted from the strap with
+            // nothing stored on our side. Returning here leaves chunkOpen=true; the next
+            // END will try again (or the idle watchdog clears without trimming).
+            guard parsed.contains(where: { $0.typeName == "HISTORICAL_DATA" }) else { return }
+
             let decoded = extract(parsed, ref.device, ref.wall)
             do { try await store.insert(decoded, deviceId: deviceId) } catch { return }
 
