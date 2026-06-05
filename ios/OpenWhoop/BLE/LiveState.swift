@@ -24,6 +24,12 @@ public final class LiveState: ObservableObject {
     /// came — i.e. caught up). Drives the sync tile + the staleness nudge.
     @Published public var lastSyncedAt: TimeInterval?
 
+    /// True while the BLE historical offload is in progress (strap → phone).
+    @Published public var isBackfilling = false
+
+    /// True while decoded streams are being uploaded (phone → server).
+    @Published public var isUploading = false
+
     /// Optional hook invoked on every battery update (wired by LiveViewModel to the alert monitor).
     /// Kept as a closure so LiveState stays a plain observable snapshot with no alert dependency.
     public var onBatteryUpdate: ((Double) -> Void)?

@@ -279,14 +279,27 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         backfiller.begin()
         backfilling = true
+        state.isBackfilling = true
         // Some WHOOP 4.0 firmware revisions return CONSOLE_LOGS (type-50) instead of type-47 for
         // plain SEND_HISTORICAL_DATA; ENTER_HIGH_FREQ_SYNC first makes those straps serve the
         // historical store. Off by default — the original revision serves type-47 without it and
         // the ENTER path is untested there. Flag is read per-call so the toggle applies next sync.
+        //
+        // Protocol: empty payload (NOT [0x00]) + 400ms settle before SEND_HISTORICAL_DATA
+        // (observed in re/sync_openwhoop.py: each step sleeps 0.4s). Firing back-to-back causes
+        // the strap to still be in the old mode when SEND_HISTORICAL_DATA lands.
         if UserDefaults.standard.bool(forKey: "useHighFreqBackfill") {
-            send(.enterHighFreqSync, payload: [0x00])
+            send(.enterHighFreqSync, payload: [])
             highFreqSyncActive = true
-            log("Backfill: entering high-freq-sync mode")
+            log("Backfill: entering high-freq-sync mode — waiting 400ms before historical request")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self, self.backfilling else { return }
+                // Payload MUST be [0x00] — verified on-device (empty → 0 frames).
+                self.send(.sendHistoricalData, payload: [0x00], writeType: .withResponse)
+                self.armBackfillTimeout()
+                self.log("Backfill: session started — historical offload requested")
+            }
+            return
         }
         // Payload MUST be [0x00], NOT empty: verified on-device that this strap serves type-47 only with
         // [0x00] (empty → 0 frames on a clean stable link with ~2k records pending); the Mac ground-truth
@@ -358,6 +371,7 @@ public final class BLEManager: NSObject, ObservableObject {
     private func exitBackfilling(reason: String) {
         guard backfilling else { return }
         backfilling = false
+        state.isBackfilling = false
         backfillTimeout?.cancel()
         backfillTimeout = nil
         backfillFrameQueue.removeAll()
@@ -407,7 +421,11 @@ public final class BLEManager: NSObject, ObservableObject {
     /// No-op when uploader is nil (placeholder secrets / unconfigured).
     private func uploadOpportunistically() {
         guard let uploader else { return }
-        Task { await uploader.drain() }
+        Task {
+            state.isUploading = true
+            await uploader.drain()
+            state.isUploading = false
+        }
     }
 
     /// Fire-and-forget server pull: GET new decoded streams + derived metrics since the read

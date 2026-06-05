@@ -1,6 +1,6 @@
 name: OpenWhoop
 options:
-  bundleIdPrefix: com.openwhoop
+  bundleIdPrefix: com.poemswe
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -27,6 +27,9 @@ targets:
         NSBluetoothAlwaysUsageDescription: >-
           OpenWhoop connects to your WHOOP 4.0 over Bluetooth to read heart rate,
           R-R intervals, battery, and sensor data locally on your device.
+        NSLocalNetworkUsageDescription: >-
+          OpenWhoop uploads your captured WHOOP data to your own self-hosted
+          server on your local network for analysis.
         UIBackgroundModes:
           - bluetooth-central
         WHOOP_BASE_URL: $(WHOOP_BASE_URL)
@@ -37,6 +40,7 @@ targets:
       - package: WhoopStore
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.poemswe.mywhoop
         TARGETED_DEVICE_FAMILY: 1
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"

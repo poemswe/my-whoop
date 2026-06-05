@@ -163,21 +163,8 @@ private struct LiveContentView: View {
                                    ?? WH.Color.textSecondary)
                 }
 
-                // Sync-freshness row + manual server recompute
-                HStack {
-                    syncFreshnessRow
-                    Spacer()
-                    consoleButton(isComputingToday ? "…" : "Recompute",
-                                  icon: "arrow.clockwise.icloud",
-                                  accent: WH.Color.strainBlue, prominent: false) {
-                        guard !isComputingToday else { return }
-                        isComputingToday = true
-                        Task {
-                            await metrics.computeToday()
-                            isComputingToday = false
-                        }
-                    }
-                }
+                // Pipeline status: strap sync → upload → server
+                syncStatusRow
 
                 // Storage summary
                 Text(model.storageSummary)
@@ -205,26 +192,69 @@ private struct LiveContentView: View {
         }
     }
 
-    private var syncFreshnessRow: some View {
-        let s = StalenessPolicy.state(lastSyncedAt: state.lastSyncedAt, now: Date().timeIntervalSince1970)
-        let (label, color): (String, Color) = {
-            switch s {
-            case .neverSynced: return ("Never synced", WH.Color.textSecondary)
-            case .caughtUp:    return ("Caught up", WH.Color.recoveryGreen)
-            case .catchingUp:  return ("Catching up…", WH.Color.recoveryYellow)
-            case .stale:       return ("Sync stale — keep the app open", WH.Color.recoveryRed)
+    private var syncStatusRow: some View {
+        HStack(spacing: WH.Spacing.sm) {
+            // Three pipeline stages: strap → phone → server
+            pipelineChip(label: "STRAP",
+                         active: state.isBackfilling,
+                         activeLabel: "Syncing…",
+                         idleLabel: "Idle")
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(WH.Color.textSecondary.opacity(0.4))
+            pipelineChip(label: "UPLOAD",
+                         active: state.isUploading,
+                         activeLabel: "Uploading…",
+                         idleLabel: staleness)
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(WH.Color.textSecondary.opacity(0.4))
+            pipelineChip(label: "SERVER",
+                         active: isComputingToday,
+                         activeLabel: "Computing…",
+                         idleLabel: "Ready")
+
+            Spacer()
+
+            consoleButton(isComputingToday ? "…" : "Recompute",
+                          icon: "arrow.clockwise.icloud",
+                          accent: WH.Color.strainBlue, prominent: false) {
+                guard !isComputingToday else { return }
+                isComputingToday = true
+                Task {
+                    await metrics.computeToday()
+                    isComputingToday = false
+                }
             }
-        }()
-        let text = state.lastSyncedAt.map { ts in
-            "\(label) · \(Int((Date().timeIntervalSince1970 - ts) / 60))m ago"
-        } ?? label
-        return HStack(spacing: WH.Spacing.xs) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text(text)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(color)
+        }
+    }
+
+    private func pipelineChip(label: String, active: Bool,
+                               activeLabel: String, idleLabel: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundStyle(WH.Color.textSecondary)
+                .tracking(0.8)
+            HStack(spacing: 3) {
+                Circle()
+                    .fill(active ? WH.Color.recoveryYellow : WH.Color.textSecondary.opacity(0.4))
+                    .frame(width: 5, height: 5)
+                Text(active ? activeLabel : idleLabel)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(active ? WH.Color.recoveryYellow : WH.Color.textSecondary)
+            }
+        }
+    }
+
+    private var staleness: String {
+        let s = StalenessPolicy.state(lastSyncedAt: state.lastSyncedAt, now: Date().timeIntervalSince1970)
+        switch s {
+        case .neverSynced: return "Never"
+        case .caughtUp:
+            return state.lastSyncedAt.map { "\(Int((Date().timeIntervalSince1970 - $0) / 60))m ago" } ?? "OK"
+        case .catchingUp:  return "Catching up"
+        case .stale:       return "Stale"
         }
     }
 
