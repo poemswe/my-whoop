@@ -47,8 +47,9 @@ ios/OpenWhoop/Info.plist
 # macOS
 .DS_Store
 
-# Secrets (real values — never commit; Secrets.example.xcconfig IS committed as a template)
+# Secrets (real values — never commit; *.example.* files ARE committed as templates)
 ios/OpenWhoop/Config/Secrets.xcconfig
+server/.env
 
 # Personal device identity for RE scripts (real BLE UUID/MAC/serial — never commit;
 # device_local.example.py IS committed as a template)
