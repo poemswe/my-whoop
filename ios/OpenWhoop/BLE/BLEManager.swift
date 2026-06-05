@@ -173,6 +173,18 @@ public final class BLEManager: NSObject, ObservableObject {
             log("Bluetooth not powered on (state=\(central.state.rawValue)); cannot scan yet")
             return
         }
+        // Fast-path: if the strap is already connected at the OS level (bonded + in range),
+        // retrieveConnectedPeripherals returns it immediately and CBCentralManager calls
+        // didConnect with no scan delay. This eliminates the "appears disconnected on open"
+        // window that users see when state restoration doesn't fire (e.g. force-quit + relaunch).
+        if let already = central.retrieveConnectedPeripherals(
+            withServices: [BLEManager.customService]).first {
+            log("Peripheral already connected at OS level — re-establishing \(already.identifier)")
+            self.peripheral = already
+            already.delegate = self
+            central.connect(already, options: nil)
+            return
+        }
         log("Scanning for service \(BLEManager.customService)…")
         central.scanForPeripherals(
             withServices: [BLEManager.customService],
