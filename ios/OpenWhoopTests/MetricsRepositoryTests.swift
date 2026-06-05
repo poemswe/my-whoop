@@ -39,14 +39,55 @@ final class MetricsRepositoryTests: XCTestCase {
 
     // MARK: - load() sets today / lastNight to most-recent rows
 
-    func testLoadSetsTodayToMostRecentDailyRow() async throws {
+    func testLoadSetsTodayToMostRecentSleepRow() async throws {
         let store = try await WhoopStore.inMemory()
         let repo = makeRepo(store: store)
         let days = try await seedDaily(store)
 
         await repo.load()
 
-        XCTAssertEqual(repo.today, days.last, "today must be the most-recent (last) daily row")
+        XCTAssertEqual(repo.today, days.last, "today must be the most-recent row with sleep data")
+    }
+
+    func testLoadSkipsStubRowWithNoSleep() async throws {
+        let store = try await WhoopStore.inMemory()
+        let repo = makeRepo(store: store)
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withFullDate]
+        let today = fmt.string(from: Date())
+        let yesterday = fmt.string(from: Date(timeIntervalSinceNow: -86_400))
+        let sleepRow = DailyMetric(day: yesterday, totalSleepMin: 400, efficiency: 0.85,
+                                   deepMin: 80, remMin: 100, lightMin: 220, disturbances: 2,
+                                   restingHr: 55, avgHrv: 58, recovery: 0.62, strain: 10, exerciseCount: 0)
+        let stubRow = DailyMetric(day: today, totalSleepMin: nil, efficiency: nil,
+                                  deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+                                  restingHr: nil, avgHrv: nil, recovery: nil, strain: 12, exerciseCount: 0)
+        try await store.upsertDailyMetrics([sleepRow, stubRow], deviceId: "test-device")
+
+        await repo.load()
+
+        XCTAssertEqual(repo.today, sleepRow,
+                       "today must skip the newer stub row and return the last row with totalSleepMin > 0")
+    }
+
+    func testLoadFallsBackToLastRowWhenNoSleepRowsExist() async throws {
+        let store = try await WhoopStore.inMemory()
+        let repo = makeRepo(store: store)
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withFullDate]
+        let today = fmt.string(from: Date())
+        let yesterday = fmt.string(from: Date(timeIntervalSinceNow: -86_400))
+        let row1 = DailyMetric(day: yesterday, totalSleepMin: nil, efficiency: nil,
+                               deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+                               restingHr: nil, avgHrv: nil, recovery: nil, strain: 8, exerciseCount: 0)
+        let row2 = DailyMetric(day: today, totalSleepMin: nil, efficiency: nil,
+                               deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+                               restingHr: nil, avgHrv: nil, recovery: nil, strain: 12, exerciseCount: 0)
+        try await store.upsertDailyMetrics([row1, row2], deviceId: "test-device")
+
+        await repo.load()
+
+        XCTAssertEqual(repo.today, row2, "today must fall back to absolute last row when no sleep rows exist")
     }
 
     func testLoadSetsLastNightToMostRecentSleepSession() async throws {

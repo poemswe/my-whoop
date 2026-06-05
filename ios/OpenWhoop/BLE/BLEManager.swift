@@ -282,6 +282,7 @@ public final class BLEManager: NSObject, ObservableObject {
         // Sending ENTER_HIGH_FREQ_SYNC first causes those straps to serve the historical store.
         // This is gated behind a UserDefaults flag (default off) — do NOT enable by default; the
         // original firmware revision serves type-47 without it and enabling it there is untested.
+        // Read each call (not once at init) so toggling takes effect on the next sync without relaunch.
         if UserDefaults.standard.bool(forKey: "useHighFreqBackfill") {
             send(.enterHighFreqSync, payload: [0x00])
             highFreqSyncActive = true
@@ -394,6 +395,8 @@ public final class BLEManager: NSObject, ObservableObject {
             state.strapNeedsReboot = stuck
             if stuck {
                 log("Watchdog: behind + frontier frozen — recovery (exit high-freq + SET_CLOCK)")
+                // Defensive belt-and-suspenders: sent unconditionally regardless of highFreqSyncActive,
+                // since a stuck strap may have been left in high-freq mode by a prior crash.
                 send(.exitHighFreqSync, payload: [0x00])
                 send(.setClock, payload: BLEManager.setClockPayload())
             }
