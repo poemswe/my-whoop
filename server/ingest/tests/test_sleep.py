@@ -595,13 +595,15 @@ class TestPhysiology:
         early = out[:30]
         assert "rem" not in early, f"early REM should be relabeled: {early}"
 
-    def test_deep_in_last_third_downgraded(self):
+    def test_deep_past_first_fraction_downgraded(self):
         feats = [_mk_feat(index=i, clock=i / 30.0) for i in range(30)]  # clock 0..~1
         labels = ["deep"] * 30
         out = sf.reimpose_physiology(labels, feats, onset_idx=0, final_wake_idx=29)
-        # deep with clock > 1/3 should be light
-        late_deep = [out[i] for i in range(30) if feats[i].clock > 1 / 3]
+        # deep with clock > DEEP_FIRST_FRACTION should be light; earlier deep survives
+        late_deep = [out[i] for i in range(30) if feats[i].clock > sf.DEEP_FIRST_FRACTION]
+        early_deep = [out[i] for i in range(30) if feats[i].clock <= sf.DEEP_FIRST_FRACTION]
         assert all(s == "light" for s in late_deep)
+        assert all(s == "deep" for s in early_deep)
 
 
 class TestNoEarlyRemIntegration:

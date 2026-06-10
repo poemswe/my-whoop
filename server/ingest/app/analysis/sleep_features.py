@@ -88,11 +88,11 @@ HR_DOG_SIGMA2_S: float = 600.0
 
 # --- Staging classifier percentile bands (per-night-relative, §4 Stage 2) ----
 #: HR percentile (over the sleep-period epochs) at/below which HR is "low".
-STAGE_HR_LOW_PCT: float = 25.0
+STAGE_HR_LOW_PCT: float = 33.0
 #: HR percentile at/above which HR is "elevated".
 STAGE_HR_HIGH_PCT: float = 70.0
 #: HF / RMSSD percentile at/above which parasympathetic tone is "high" (deep).
-STAGE_HRV_HIGH_PCT: float = 70.0
+STAGE_HRV_HIGH_PCT: float = 60.0
 #: HR-variability (Walch DoG std) percentile at/above which cardiac is "activated"
 #: (REM / wake signature).
 STAGE_HRV_VAR_HIGH_PCT: float = 65.0
@@ -119,9 +119,12 @@ SMOOTH_EPOCHS: int = 5
 #: No REM allowed in the first N minutes after sleep onset (physiology: REM
 #: latency is typically 70–120 min; we use a conservative 15-min floor).
 NO_REM_AFTER_ONSET_MIN: float = 15.0
-#: Deep sleep is concentrated in the first third of the night; deep detected in
-#: the last third is downgraded to light (physiology re-imposition, §4 Stage 3).
-DEEP_FIRST_FRACTION: float = 1.0 / 3.0
+#: Deep sleep is concentrated early in the night; deep detected in the LAST
+#: third is downgraded to light (physiology re-imposition, §4 Stage 3). The
+#: cut applies to clock > this fraction — 2/3 means "downgrade in the last
+#: third", matching the docstring intent. (Was 1/3, which wrongly erased deep
+#: across the last TWO-thirds of the night and zeroed deep_min most nights.)
+DEEP_FIRST_FRACTION: float = 2.0 / 3.0
 
 
 # ===========================================================================
@@ -623,6 +626,12 @@ def classify_epochs(features: Sequence[EpochFeatures]) -> list[str]:
     hr_lo = _pct(hr_vals, STAGE_HR_LOW_PCT)
     hr_hi = _pct(hr_vals, STAGE_HR_HIGH_PCT)
     hf_hi = _pct(hf_vals, STAGE_HRV_HIGH_PCT)
+    # Degenerate HF guard: when >STAGE_HRV_HIGH_PCT% of epochs have HF == 0 (the
+    # frequency feature failed to resolve), the band collapses to 0.0 and the
+    # "hf >= hf_hi" gate passes for every epoch — disable it and let RMSSD carry
+    # the parasympathetic test alone.
+    if hf_hi is not None and hf_hi <= 0.0:
+        hf_hi = None
     rmssd_hi = _pct(rmssd_vals, STAGE_HRV_HIGH_PCT)
     hrvar_hi = _pct(hrvar_vals, STAGE_HRV_VAR_HIGH_PCT)
     rrv_hi = _pct(rrv_vals, STAGE_RRV_HIGH_PCT)
