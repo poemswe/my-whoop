@@ -145,11 +145,26 @@ final class MetricsRepository: ObservableObject {
 
         if let store {
             let now = Int(Date().timeIntervalSince1970)
+            let windowStart = now - 14 * 86_400
+            let windowEnd   = now + 86_400
+
+            let fmt = DateFormatter()
+            fmt.calendar = Calendar(identifier: .gregorian)
+            fmt.timeZone = TimeZone(identifier: "UTC")
+            fmt.dateFormat = "yyyy-MM-dd"
+            let fromDay = fmt.string(from: Date(timeIntervalSince1970: TimeInterval(windowStart)))
+            let toDay   = fmt.string(from: Date(timeIntervalSince1970: TimeInterval(windowEnd)))
+
             let sessions = (try? await store.sleepSessions(deviceId: deviceId,
-                                                           from: now - 14 * 86_400,
-                                                           to: now + 86_400,
+                                                           from: windowStart, to: windowEnd,
                                                            limit: 50)) ?? []
+            let days     = (try? await store.dailyMetrics(deviceId: deviceId,
+                                                          from: fromDay, to: toDay)) ?? []
+            let workouts = await serverSync?.getWorkouts(from: fromDay, to: toDay) ?? []
+
             await HealthKitSync.shared.writeSessions(sessions)
+            await HealthKitSync.shared.writeMetrics(days)
+            await HealthKitSync.shared.writeWorkouts(workouts)
         }
 
         isRefreshing = false

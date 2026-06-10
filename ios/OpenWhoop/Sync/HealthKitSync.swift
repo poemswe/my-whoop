@@ -4,15 +4,12 @@ import WhoopStore
 
 // MARK: - HealthKitSync
 //
-// Writes server-computed sleep sessions to Apple Health as HKCategorySample entries.
-// One sample per stage segment; the full in-bed span is always written as .inBed so
-// Health's Sleep timeline shows the correct block even when staging is incomplete.
+// Writes server-computed data to Apple Health on every pull-to-refresh.
+// All writes are best-effort: errors are silently swallowed and never thrown to callers.
+// Authorization is requested lazily on the first write; denial is silently ignored.
 //
-// Authorization is requested lazily on the first write attempt; if the user denies it
-// the write is silently skipped (never throws to the caller).
-//
-// STAGE MAPPING (AASM → HealthKit):
-//   "light"  → .asleepCore      (N1/N2 combined — the closest HK equivalent)
+// SLEEP STAGE MAPPING (AASM → HealthKit):
+//   "light"  → .asleepCore      (N1/N2 combined)
 //   "deep"   → .asleepDeep
 //   "rem"    → .asleepREM
 //   "wake"   → .awake
@@ -27,6 +24,11 @@ final class HealthKitSync {
 
     private static let writeTypes: Set<HKSampleType> = [
         HKCategoryType(.sleepAnalysis),
+        HKQuantityType(.heartRateVariabilitySDNN),
+        HKQuantityType(.restingHeartRate),
+        HKQuantityType(.oxygenSaturation),
+        HKQuantityType(.respiratoryRate),
+        HKObjectType.workoutType(),
     ]
 
     // MARK: - Authorization
@@ -37,80 +39,99 @@ final class HealthKitSync {
         do {
             try await store.requestAuthorization(toShare: Self.writeTypes, read: [])
             authorized = true
-        } catch {
-            // Silently ignore — permission denied or unavailable.
-        }
+        } catch {}
     }
 
-    // MARK: - Write sleep sessions
+    // MARK: - Write sleep sessions (sleep stages + HRV)
 
-    /// Write `sessions` to HealthKit. Deletes any existing OpenWhoop-sourced samples that
-    /// overlap the written date range first so recomputes don't duplicate entries.
     func writeSessions(_ sessions: [CachedSleepSession]) async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         await requestAuthorizationIfNeeded()
-
         guard !sessions.isEmpty else { return }
 
-        let samples = sessions.flatMap { makeSamples(for: $0) }
+        let sleepSamples = sessions.flatMap { makeSleepSamples(for: $0) }
+        let hrvSamples   = sessions.compactMap { makeHRVSample(for: $0) }
+        let samples: [HKSample] = sleepSamples + hrvSamples
         guard !samples.isEmpty else { return }
 
-        // Delete existing samples from this source for the covered span before inserting.
         let minStart = sessions.map { $0.startTs }.min()!
         let maxEnd   = sessions.map { $0.endTs }.max()!
-        await deleteExisting(from: minStart, to: maxEnd)
+        await deleteExisting(types: [HKCategoryType(.sleepAnalysis),
+                                     HKQuantityType(.heartRateVariabilitySDNN)],
+                             from: minStart, to: maxEnd)
+        do { try await store.save(samples) } catch {}
+    }
 
-        do {
-            try await store.save(samples)
-        } catch {
-            // Best-effort — silently ignore write failures.
+    // MARK: - Write daily metrics (resting HR, SpO2, respiratory rate)
+
+    func writeMetrics(_ days: [DailyMetric]) async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        await requestAuthorizationIfNeeded()
+        guard !days.isEmpty else { return }
+
+        let (fromEpoch, toEpoch) = metricEpochRange(days)
+
+        // Save each type independently — one bad value (e.g. low SpO2) won't block the others.
+        let typeGroups: [(HKObjectType, [HKSample])] = [
+            (HKQuantityType(.restingHeartRate), days.compactMap { makeRestingHRSample(for: $0) }),
+            (HKQuantityType(.oxygenSaturation), days.compactMap { makeSpO2Sample(for: $0) }),
+            (HKQuantityType(.respiratoryRate),  days.compactMap { makeRespRateSample(for: $0) }),
+        ]
+        for (type, samples) in typeGroups {
+            guard !samples.isEmpty else { continue }
+            await deleteExisting(types: [type], from: fromEpoch, to: toEpoch)
+            do { try await store.save(samples) } catch {}
         }
     }
 
-    // MARK: - Sample construction
+    // MARK: - Write workouts
 
-    private func makeSamples(for session: CachedSleepSession) -> [HKCategorySample] {
-        let type = HKCategoryType(.sleepAnalysis)
-        let source = HKSource.default()
-        var out: [HKCategorySample] = []
+    func writeWorkouts(_ workouts: [Workout]) async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        await requestAuthorizationIfNeeded()
+        guard !workouts.isEmpty else { return }
 
-        // Parse the stages JSON if present.
+        let samples = workouts.compactMap { makeWorkoutSample(for: $0) }
+        guard !samples.isEmpty else { return }
+
+        let minStart = workouts.map { $0.startTs }.min()!
+        let maxEnd   = workouts.map { $0.endTs }.max()!
+        await deleteExisting(types: [HKObjectType.workoutType()], from: minStart, to: maxEnd)
+        do { try await store.save(samples) } catch {}
+    }
+
+    // MARK: - Sleep sample construction
+
+    private func makeSleepSamples(for session: CachedSleepSession) -> [HKCategorySample] {
+        let type   = HKCategoryType(.sleepAnalysis)
         let stages = parseStages(session.stagesJSON)
 
         if stages.isEmpty {
-            // No stage detail — write a single in-bed block for the full session.
             let start = Date(timeIntervalSince1970: TimeInterval(session.startTs))
             let end   = Date(timeIntervalSince1970: TimeInterval(session.endTs))
-            let sample = HKCategorySample(type: type,
-                                          value: HKCategoryValueSleepAnalysis.inBed.rawValue,
-                                          start: start, end: end,
-                                          device: nil, metadata: [HKMetadataKeyWasUserEntered: false])
-            return [sample]
+            return [HKCategorySample(type: type, value: HKCategoryValueSleepAnalysis.inBed.rawValue,
+                                     start: start, end: end, device: nil,
+                                     metadata: [HKMetadataKeyWasUserEntered: false])]
         }
 
-        // In-bed wrapper (full session span).
+        var out: [HKCategorySample] = []
         let sessionStart = Date(timeIntervalSince1970: TimeInterval(session.startTs))
         let sessionEnd   = Date(timeIntervalSince1970: TimeInterval(session.endTs))
-        out.append(HKCategorySample(type: type,
-                                    value: HKCategoryValueSleepAnalysis.inBed.rawValue,
-                                    start: sessionStart, end: sessionEnd,
-                                    device: nil, metadata: [HKMetadataKeyWasUserEntered: false]))
-
-        // Per-stage samples.
+        out.append(HKCategorySample(type: type, value: HKCategoryValueSleepAnalysis.inBed.rawValue,
+                                    start: sessionStart, end: sessionEnd, device: nil,
+                                    metadata: [HKMetadataKeyWasUserEntered: false]))
         for seg in stages {
             let start = Date(timeIntervalSince1970: seg.start)
             let end   = Date(timeIntervalSince1970: seg.end)
             guard end > start else { continue }
-            let value = hkValue(for: seg.stage)
-            out.append(HKCategorySample(type: type,
-                                        value: value.rawValue,
-                                        start: start, end: end,
-                                        device: nil, metadata: [HKMetadataKeyWasUserEntered: false]))
+            out.append(HKCategorySample(type: type, value: hkSleepValue(for: seg.stage).rawValue,
+                                        start: start, end: end, device: nil,
+                                        metadata: [HKMetadataKeyWasUserEntered: false]))
         }
         return out
     }
 
-    private func hkValue(for stage: String) -> HKCategoryValueSleepAnalysis {
+    private func hkSleepValue(for stage: String) -> HKCategoryValueSleepAnalysis {
         switch stage {
         case "deep":  return .asleepDeep
         case "rem":   return .asleepREM
@@ -120,38 +141,129 @@ final class HealthKitSync {
         }
     }
 
-    // MARK: - Deletion of stale samples
+    private func makeHRVSample(for session: CachedSleepSession) -> HKQuantitySample? {
+        guard let hrv = session.avgHrv, hrv > 0 else { return nil }
+        let start = Date(timeIntervalSince1970: TimeInterval(session.startTs))
+        let end   = Date(timeIntervalSince1970: TimeInterval(session.endTs))
+        return HKQuantitySample(type: HKQuantityType(.heartRateVariabilitySDNN),
+                                quantity: HKQuantity(unit: .secondUnit(with: .milli), doubleValue: hrv),
+                                start: start, end: end,
+                                metadata: [HKMetadataKeyWasUserEntered: false])
+    }
 
-    private func deleteExisting(from startEpoch: Int, to endEpoch: Int) async {
-        let type = HKCategoryType(.sleepAnalysis)
+    // MARK: - Daily metric sample construction
+
+    private func makeRestingHRSample(for day: DailyMetric) -> HKQuantitySample? {
+        guard let hr = day.restingHr, hr > 0 else { return nil }
+        let (start, end) = dayBounds(day.day)
+        return HKQuantitySample(type: HKQuantityType(.restingHeartRate),
+                                quantity: HKQuantity(unit: .count().unitDivided(by: .minute()),
+                                                     doubleValue: Double(hr)),
+                                start: start, end: end,
+                                metadata: [HKMetadataKeyWasUserEntered: false])
+    }
+
+    private func makeSpO2Sample(for day: DailyMetric) -> HKQuantitySample? {
+        guard let spo2 = day.spo2Pct, spo2 > 0 else { return nil }
+        let (start, end) = dayBounds(day.day)
+        return HKQuantitySample(type: HKQuantityType(.oxygenSaturation),
+                                quantity: HKQuantity(unit: .percent(), doubleValue: spo2 / 100.0),
+                                start: start, end: end,
+                                metadata: [HKMetadataKeyWasUserEntered: false])
+    }
+
+    private func makeRespRateSample(for day: DailyMetric) -> HKQuantitySample? {
+        guard let rr = day.respRateBpm, rr > 0 else { return nil }
+        let (start, end) = dayBounds(day.day)
+        return HKQuantitySample(type: HKQuantityType(.respiratoryRate),
+                                quantity: HKQuantity(unit: .count().unitDivided(by: .minute()),
+                                                     doubleValue: rr),
+                                start: start, end: end,
+                                metadata: [HKMetadataKeyWasUserEntered: false])
+    }
+
+    private func dayBounds(_ day: String) -> (Date, Date) {
+        let noon = isoMidnight(day).addingTimeInterval(12 * 3600)
+        return (noon, noon)
+    }
+
+    private func metricEpochRange(_ days: [DailyMetric]) -> (Int, Int) {
+        let start = isoMidnight(days.first!.day)
+        let end   = isoMidnight(days.last!.day).addingTimeInterval(86_400)
+        return (Int(start.timeIntervalSince1970), Int(end.timeIntervalSince1970))
+    }
+
+    private func isoMidnight(_ day: String) -> Date {
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.date(from: day) ?? Date()
+    }
+
+    // MARK: - Workout sample construction
+
+    private func makeWorkoutSample(for w: Workout) -> HKWorkout? {
+        let start = Date(timeIntervalSince1970: TimeInterval(w.startTs))
+        let end   = Date(timeIntervalSince1970: TimeInterval(w.endTs))
+        guard end > start else { return nil }
+        let calories = w.caloriesKcal.map { HKQuantity(unit: .kilocalorie(), doubleValue: $0) }
+        return HKWorkout(activityType: hkActivityType(for: w.kind),
+                         start: start, end: end,
+                         workoutEvents: nil,
+                         totalEnergyBurned: calories,
+                         totalDistance: nil,
+                         metadata: [HKMetadataKeyWasUserEntered: false])
+    }
+
+    private func hkActivityType(for kind: String?) -> HKWorkoutActivityType {
+        switch kind {
+        case "running":            return .running
+        case "cycling":            return .cycling
+        case "swimming":           return .swimming
+        case "walking":            return .walking
+        case "hiking":             return .hiking
+        case "yoga":               return .yoga
+        case "strength_training":  return .traditionalStrengthTraining
+        case "rowing":             return .rowing
+        case "elliptical":         return .elliptical
+        case "stair_climbing":     return .stairClimbing
+        case "pilates":            return .pilates
+        case "basketball":         return .basketball
+        case "soccer":             return .soccer
+        case "tennis":             return .tennis
+        case "golf":               return .golf
+        case "boxing":             return .boxing
+        case "martial_arts":       return .martialArts
+        case "dance":              return .dance
+        case "skiing":             return .downhillSkiing
+        case "snowboarding":       return .snowboarding
+        default:                   return .other
+        }
+    }
+
+    // MARK: - Deletion
+
+    private func deleteExisting(types: [HKObjectType], from startEpoch: Int, to endEpoch: Int) async {
         let start = Date(timeIntervalSince1970: TimeInterval(startEpoch))
         let end   = Date(timeIntervalSince1970: TimeInterval(endEpoch))
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
-        let sourcePredicate = HKQuery.predicateForObjects(from: [HKSource.default()])
-        let combined = NSCompoundPredicate(andPredicateWithSubpredicates: [predicate, sourcePredicate])
-
-        do {
-            try await store.deleteObjects(of: type, predicate: combined)
-        } catch {
-            // Non-fatal — old samples may remain; duplicates are visible but not harmful.
+        let timePred   = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+        let sourcePred = HKQuery.predicateForObjects(from: [HKSource.default()])
+        let predicate  = NSCompoundPredicate(andPredicateWithSubpredicates: [timePred, sourcePred])
+        for type in types {
+            do { try await store.deleteObjects(of: type, predicate: predicate) } catch {}
         }
     }
 
     // MARK: - Stage JSON parsing
 
-    private struct StageSegment {
-        let start: Double
-        let end: Double
-        let stage: String
-    }
+    private struct StageSegment { let start: Double; let end: Double; let stage: String }
 
     private func parseStages(_ json: String?) -> [StageSegment] {
         guard let json,
               let data = json.data(using: .utf8),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return []
-        }
-        return arr.compactMap { d -> StageSegment? in
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return arr.compactMap { d in
             guard let start = (d["start"] as? NSNumber)?.doubleValue,
                   let end   = (d["end"]   as? NSNumber)?.doubleValue,
                   let stage = d["stage"]  as? String else { return nil }
