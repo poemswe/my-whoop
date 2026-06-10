@@ -328,7 +328,7 @@ final class ServerSync {
         // /v1/daily over the window. This is the authoritative list of days WITH data.
         guard let days = await getDaily(from: fromDay, to: toDay) else { return }
         if !days.isEmpty {
-            try? await store.upsertDailyMetrics(days, deviceId: deviceId)
+            do { try await store.upsertDailyMetrics(days, deviceId: deviceId) } catch {}
         }
 
         // /v1/sleep is per-date; fetch ONLY the days that appear in /v1/daily (days with computed
@@ -338,9 +338,9 @@ final class ServerSync {
         // survive across recomputes.
         for metric in days {
             guard let sessions = await getSleep(date: metric.day) else { continue }
-            try? await store.deleteSessionsForDay(deviceId: deviceId, day: metric.day)
+            do { try await store.deleteSessionsForDay(deviceId: deviceId, day: metric.day) } catch {}
             if !sessions.isEmpty {
-                try? await store.upsertSleepSessions(sessions, deviceId: deviceId)
+                do { try await store.upsertSleepSessions(sessions, deviceId: deviceId) } catch {}
             }
         }
     }

@@ -235,7 +235,7 @@ final class HealthKitSync {
         case "golf":               return .golf
         case "boxing":             return .boxing
         case "martial_arts":       return .martialArts
-        case "dance":              return .dance
+        case "dance":              return .cardioDance
         case "skiing":             return .downhillSkiing
         case "snowboarding":       return .snowboarding
         default:                   return .other

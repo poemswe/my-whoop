@@ -304,6 +304,7 @@ final class MetricsRepository: ObservableObject {
         return await serverSync?.computeToday() ?? false
     }
 
+    @discardableResult
     func backfillWorkouts(from: String, to: String) async -> Bool {
         await ensureOpen()
         return await serverSync?.backfillWorkouts(from: from, to: to) ?? false
