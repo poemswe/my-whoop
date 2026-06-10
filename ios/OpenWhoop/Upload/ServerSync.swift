@@ -332,9 +332,14 @@ final class ServerSync {
         }
 
         // /v1/sleep is per-date; fetch ONLY the days that appear in /v1/daily (days with computed
-        // metrics) rather than every calendar day in the window. Idempotent upserts.
+        // metrics) rather than every calendar day in the window.
+        // Delete-then-upsert: stale sessions (recomputed, truncated, or removed false-positives)
+        // must be evicted from GRDB before inserting the fresh server list so orphaned rows don't
+        // survive across recomputes.
         for metric in days {
-            if let sessions = await getSleep(date: metric.day), !sessions.isEmpty {
+            guard let sessions = await getSleep(date: metric.day) else { continue }
+            try? await store.deleteSessionsForDay(deviceId: deviceId, day: metric.day)
+            if !sessions.isEmpty {
                 try? await store.upsertSleepSessions(sessions, deviceId: deviceId)
             }
         }

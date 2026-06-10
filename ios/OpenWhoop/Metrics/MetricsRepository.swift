@@ -142,6 +142,16 @@ final class MetricsRepository: ObservableObject {
         lastError = nil
         await serverSync?.pullDerived()
         await load()
+
+        if let store {
+            let now = Int(Date().timeIntervalSince1970)
+            let sessions = (try? await store.sleepSessions(deviceId: deviceId,
+                                                           from: now - 14 * 86_400,
+                                                           to: now + 86_400,
+                                                           limit: 50)) ?? []
+            await HealthKitSync.shared.writeSessions(sessions)
+        }
+
         isRefreshing = false
         lastRefreshedAt = Date()
 
@@ -228,10 +238,13 @@ final class MetricsRepository: ObservableObject {
         let now = Int(Date().timeIntervalSince1970)
         let windowStart = now - (nights + 2) * 86_400
         let windowEnd   = now + 86_400
+        // Use a generous limit: false-positive daytime sessions (gravity-stillness naps)
+        // can create many sessions per day, pushing recent nights off the bottom of a
+        // tight limit. 50 is well above any realistic session count for a 9-day window.
         let sessions = (try? await store.sleepSessions(deviceId: deviceId,
                                                        from: windowStart,
                                                        to: windowEnd,
-                                                       limit: nights + 2)) ?? []
+                                                       limit: 50)) ?? []
         // sleepSessions returns ASC by startTs; take the last `nights` (most-recent), keep ASC order.
         return Array(sessions.suffix(nights))
     }

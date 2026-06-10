@@ -122,6 +122,17 @@ HR_REFINE_MIN_SAMPLES: int = 30
 #: micro-onsets). 3 epochs = 90 s of persistent sleep (AASM-style).
 ONSET_PERSIST_EPOCHS: int = 3
 
+# --- Daytime nap exclusion --------------------------------------------------
+#: UTC hour range [start, end) within which a session START is treated as a
+#: daytime nap and excluded from the nightly daily_sleep_summary aggregate.
+#: 10–22 UTC ≈ 6 AM–6 PM ET (summer) — covers mid-day gravity-stillness false
+#: positives (e.g. sitting still on a plane) while keeping early-morning naps
+#: and evening pre-sleep dozes that straddle midnight in the nightly total.
+#: Sessions detected here are still STORED in sleep_sessions for raw inspection;
+#: they are only excluded from the daily metric aggregate.
+DAYTIME_START_UTC_H: int = 10
+DAYTIME_END_UTC_H: int = 22
+
 
 # ===========================================================================
 # Data shapes  (UNCHANGED public interface)
@@ -650,7 +661,7 @@ def daily_sleep_summary(sessions: Sequence[SleepSession], date: _dt.date) -> dic
 
     With no matching session, returns zeros / None (documented sentinel).
     """
-    matched = [s for s in sessions if _end_date_utc(s) == date]
+    matched = [s for s in sessions if _end_date_utc(s) == date and not _is_daytime_nap(s)]
 
     if not matched:
         return {
@@ -696,6 +707,18 @@ def daily_sleep_summary(sessions: Sequence[SleepSession], date: _dt.date) -> dic
 
 def _end_date_utc(s: SleepSession) -> _dt.date:
     return _dt.datetime.fromtimestamp(s.end, _dt.timezone.utc).date()
+
+
+def _is_daytime_nap(s: SleepSession) -> bool:
+    """True when the session starts within the daytime exclusion window (UTC).
+
+    Gravity-stillness detection can fire on extended wrist-still periods during
+    the day (sitting on a plane, desk work). Sessions starting between
+    DAYTIME_START_UTC_H and DAYTIME_END_UTC_H are excluded from the nightly
+    daily_sleep_summary aggregate; they are still stored in sleep_sessions.
+    """
+    start_hour = _dt.datetime.fromtimestamp(s.start, _dt.timezone.utc).hour
+    return DAYTIME_START_UTC_H <= start_hour < DAYTIME_END_UTC_H
 
 
 def _resting_hr(sessions: Sequence[SleepSession]) -> float | None:

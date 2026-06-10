@@ -244,11 +244,19 @@ def query_daily(conn, device_id, start_date, end_date):
 def query_sleep(conn, device_id, day):
     """Sleep sessions for a device whose END falls on ``day`` (the night ending
     that morning). ``day`` is a datetime.date (or YYYY-MM-DD string). Stages are
-    returned parsed (JSONB → list). Timestamps are tz-aware datetimes (ISO on the wire)."""
+    returned parsed (JSONB → list). Timestamps are tz-aware datetimes (ISO on the wire).
+
+    Daytime sessions (start_ts UTC hour in [10, 22)) are excluded — gravity-stillness
+    false positives that inflate the nightly record are kept in the DB for raw
+    inspection but omitted from the derived API."""
     cols = ["device_id", "start_ts", "end_ts", "efficiency", "resting_hr", "avg_hrv", "stages"]
     rows = conn.execute(
         f"SELECT {', '.join(cols)} FROM sleep_sessions "
-        "WHERE device_id = %s AND (end_ts AT TIME ZONE 'UTC')::date = %s ORDER BY start_ts",
+        "WHERE device_id = %s "
+        "  AND (end_ts AT TIME ZONE 'UTC')::date = %s "
+        "  AND NOT (EXTRACT(HOUR FROM start_ts AT TIME ZONE 'UTC') >= 10 "
+        "           AND EXTRACT(HOUR FROM start_ts AT TIME ZONE 'UTC') < 22) "
+        "ORDER BY start_ts",
         (device_id, day),
     ).fetchall()
     return [dict(zip(cols, r)) for r in rows]

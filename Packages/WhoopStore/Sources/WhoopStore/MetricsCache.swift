@@ -121,6 +121,21 @@ extension WhoopStore {
         }
     }
 
+    /// Delete all cached sleep sessions whose UTC end date equals `day` (YYYY-MM-DD).
+    /// Called before re-upserting the server's fresh session list for that day so that sessions
+    /// deleted on the server (recomputed shorter, split differently, or removed as false positives)
+    /// don't survive as stale orphans in the local GRDB cache.
+    @discardableResult
+    public func deleteSessionsForDay(deviceId: String, day: String) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                DELETE FROM sleepSession
+                WHERE deviceId = ? AND date(endTs, 'unixepoch') = ?
+                """, arguments: [deviceId, day])
+            return db.changesCount
+        }
+    }
+
     // MARK: - Reads
 
     /// Cached sleep sessions overlapping [from, to] (by startTs), oldest first.
