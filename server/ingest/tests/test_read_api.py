@@ -184,3 +184,64 @@ def test_backfill_workouts_from_to_aliases_accepted():
     obj3 = _BackfillWorkouts.model_validate({"device": "dev1"})
     assert obj3.from_date is None
     assert obj3.to_date is None
+
+
+# ── /v1/sleep range mode ──────────────────────────────────────────────────────
+
+def _seed_sleep_range(dsn, device="devS"):
+    """Three sessions: nights ending Jun 1 and Jun 2 2026 (UTC), plus a daytime
+    nap on Jun 2 that the nap filter must exclude. 2026-06-01T00:00Z == 1780272000."""
+    jun1 = 1780272000
+    with psycopg.connect(dsn) as conn:
+        store.ensure_device(conn, device)
+        store.upsert_sleep_sessions(conn, device, [
+            # Night A: May 31 23:00 → Jun 1 07:00 (start hour 23 — kept)
+            {"start": jun1 - 3600, "end": jun1 + 7 * 3600, "efficiency": 0.9,
+             "resting_hr": 55, "avg_hrv": 80.0,
+             "stages": [{"start": jun1 - 3600, "end": jun1 + 7 * 3600, "stage": "light"}]},
+            # Night B: Jun 2 00:30 → Jun 2 08:00 (start hour 0 — kept)
+            {"start": jun1 + 86400 + 1800, "end": jun1 + 86400 + 8 * 3600,
+             "efficiency": 0.85, "resting_hr": 57, "avg_hrv": 75.0,
+             "stages": [{"start": jun1 + 86400 + 1800, "end": jun1 + 86400 + 8 * 3600,
+                         "stage": "light"}]},
+            # Daytime nap: Jun 2 12:00 → 13:30 (start hour 12 — EXCLUDED)
+            {"start": jun1 + 86400 + 12 * 3600, "end": jun1 + 86400 + 13 * 3600 + 1800,
+             "efficiency": 0.8, "resting_hr": 60, "avg_hrv": 70.0, "stages": []},
+        ])
+        conn.commit()
+
+
+@requires_docker
+def test_sleep_range_returns_nights_excludes_naps(client, clean_db):
+    _seed_sleep_range(clean_db)
+    rows = client.get("/v1/sleep", params={
+        "device": "devS", "from": "2026-06-01", "to": "2026-06-02"}).json()
+    assert isinstance(rows, list)
+    assert len(rows) == 2, f"expected 2 nights (nap excluded), got {len(rows)}"
+    # Ordered by start_ts; both carry stages.
+    assert rows[0]["resting_hr"] == 55
+    assert rows[1]["resting_hr"] == 57
+
+
+@requires_docker
+def test_sleep_range_outside_window_empty(client, clean_db):
+    _seed_sleep_range(clean_db)
+    rows = client.get("/v1/sleep", params={
+        "device": "devS", "from": "2026-07-01", "to": "2026-07-02"}).json()
+    assert rows == []
+
+
+@requires_docker
+def test_sleep_requires_date_or_range(client):
+    r = client.get("/v1/sleep", params={"device": "devS"})
+    assert r.status_code == 400
+    r = client.get("/v1/sleep", params={"device": "devS", "from": "2026-06-01"})
+    assert r.status_code == 400
+
+
+@requires_docker
+def test_sleep_date_param_still_works(client, clean_db):
+    _seed_sleep_range(clean_db)
+    rows = client.get("/v1/sleep", params={
+        "device": "devS", "date": "2026-06-02"}).json()
+    assert len(rows) == 1 and rows[0]["resting_hr"] == 57

@@ -241,11 +241,23 @@ def get_daily(device: str,
 
 
 @app.get("/v1/sleep", dependencies=[Depends(require_auth)])
-def get_sleep(device: str, date: str):
-    """Sleep sessions whose night ENDS on ``date`` (YYYY-MM-DD)."""
-    day = _parse_date(date)
-    with psycopg.connect(cfg.db_dsn) as conn:
-        return read.query_sleep(conn, device, day)
+def get_sleep(device: str,
+              date: str | None = None,
+              from_: str | None = Query(None, alias="from"),
+              to: str | None = None):
+    """Sleep sessions. Modes: ``?date=`` — sessions whose night ENDS on that
+    date (original behavior, unchanged response shape); ``?from=&to=`` — all
+    sessions whose night ends inside the inclusive range (one call replaces the
+    client's per-day fan-out). Exactly one mode must be supplied."""
+    if date is not None:
+        day = _parse_date(date)
+        with psycopg.connect(cfg.db_dsn) as conn:
+            return read.query_sleep(conn, device, day)
+    if from_ is not None and to is not None:
+        start, end = _parse_date(from_), _parse_date(to)
+        with psycopg.connect(cfg.db_dsn) as conn:
+            return read.query_sleep_range(conn, device, start, end)
+    raise HTTPException(status_code=400, detail="provide either date or from+to")
 
 
 # ── Profile endpoints ─────────────────────────────────────────────────────────

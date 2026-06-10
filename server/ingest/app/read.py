@@ -262,6 +262,25 @@ def query_sleep(conn, device_id, day):
     return [dict(zip(cols, r)) for r in rows]
 
 
+def query_sleep_range(conn, device_id, from_day, to_day):
+    """Sleep sessions whose END date (UTC) falls in [from_day, to_day] inclusive.
+
+    Same column list and daytime-nap exclusion as ``query_sleep`` — one ranged
+    query replaces the per-day fan-out the iOS client used to make (~61 calls
+    per refresh). Ordered by start_ts across the whole range."""
+    cols = ["device_id", "start_ts", "end_ts", "efficiency", "resting_hr", "avg_hrv", "stages"]
+    rows = conn.execute(
+        f"SELECT {', '.join(cols)} FROM sleep_sessions "
+        "WHERE device_id = %s "
+        "  AND (end_ts AT TIME ZONE 'UTC')::date BETWEEN %s AND %s "
+        "  AND NOT (EXTRACT(HOUR FROM start_ts AT TIME ZONE 'UTC') >= 10 "
+        "           AND EXTRACT(HOUR FROM start_ts AT TIME ZONE 'UTC') < 22) "
+        "ORDER BY start_ts",
+        (device_id, from_day, to_day),
+    ).fetchall()
+    return [dict(zip(cols, r)) for r in rows]
+
+
 _WORKOUT_COLS = [
     "device_id", "start_ts", "end_ts", "avg_hr", "peak_hr", "strain", "kind",
     "duration_s", "zone_time_pct", "avg_hrr_pct", "hrmax", "hrmax_source",
