@@ -80,8 +80,16 @@ private func expectedEndData(trim: UInt32, next: UInt32 = 0) -> [UInt8] {
     le32(trim) + le32(next)
 }
 
-/// An arbitrary non-metadata data frame (type 40 = REALTIME_DATA, minimal).
+/// An arbitrary non-metadata data frame (type 47 = HISTORICAL_DATA, minimal). MUST be
+/// type 47: finishChunk refuses to insert or ack a chunk containing no HISTORICAL_DATA
+/// frames (the CONSOLE_LOGS data-loss guard added in ec506bc).
 private func dataFrame() -> [UInt8] {
+    frameFromPayload([0x00, 0x01], type: 47, seq: 0, cmd: 0)
+}
+
+/// A non-historical data frame (type 40 = REALTIME_DATA) — what the strap emits in
+/// CONSOLE_LOGS mode. A chunk of only these must NOT advance the trim.
+private func consoleLogFrame() -> [UInt8] {
     frameFromPayload([0x00, 0x01], type: 40, seq: 0, cmd: 0)
 }
 
@@ -352,6 +360,24 @@ final class BackfillerTests: XCTestCase {
         XCTAssertEqual(store.calls, [.setCursor(name: "strap_trim", value: 42)],
                        "no insert (empty chunk) but cursor advances")
         XCTAssertEqual(acks, [42], "empty END still acks to advance the offload")
+    }
+
+    // A chunk of ONLY non-historical frames (CONSOLE_LOGS mode) must not insert, trim, or
+    // ack — acking would permanently delete strap records we never stored (ec506bc guard).
+    func testConsoleLogsChunkDoesNotAck() async throws {
+        let store = SpyBackfillStore()
+        var acks: [UInt32] = []
+        let bf = Backfiller(store: store, deviceId: "whoop-test",
+                            ackTrim: { v, _ in acks.append(v) },
+                            extract: { _, _, _ in Streams() })
+        bf.clockRef = defaultRef()
+        bf.begin()
+        await bf.ingest(metaFrame(1))                              // START
+        await bf.ingest(consoleLogFrame())                         // type-40 only
+        await bf.ingest(endFrame(unix: 1_700_001_000, trim: 77))   // END
+
+        XCTAssertEqual(store.calls, [], "no insert/cursor for a no-type-47 chunk")
+        XCTAssertEqual(acks, [], "ack must NOT advance the trim past unstored records")
     }
 
     // MARK: - chunk with clockRef == nil → identity-fallback (type-47 is self-contained)

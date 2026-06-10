@@ -11,12 +11,15 @@ final class MetricsRepositoryTests: XCTestCase {
         MetricsRepository(store: store, serverSync: nil, deviceId: "test-device")
     }
 
+    /// Seeds two rows at daysAgo 3 and 2 — RELATIVE dates, so they always land inside
+    /// load()'s 14-day window. (Hardcoded dates here rotted once the calendar moved past
+    /// the window and silently broke the load() tests.)
     private func seedDaily(_ store: WhoopStore) async throws -> [DailyMetric] {
         let days = [
-            DailyMetric(day: "2026-05-20", totalSleepMin: 400, efficiency: 0.85,
+            DailyMetric(day: dayString(daysAgo: 3), totalSleepMin: 400, efficiency: 0.85,
                         deepMin: 80, remMin: 100, lightMin: 220, disturbances: 2,
                         restingHr: 55, avgHrv: 58, recovery: 0.62, strain: 10, exerciseCount: 1),
-            DailyMetric(day: "2026-05-21", totalSleepMin: 430, efficiency: 0.90,
+            DailyMetric(day: dayString(daysAgo: 2), totalSleepMin: 430, efficiency: 0.90,
                         deepMin: 90, remMin: 110, lightMin: 230, disturbances: 1,
                         restingHr: 52, avgHrv: 65, recovery: 0.75, strain: 12, exerciseCount: 0),
         ]
@@ -119,11 +122,11 @@ final class MetricsRepositoryTests: XCTestCase {
         let days = try await seedDaily(store)
 
         // Full window — should get both rows.
-        let all = await repo.daily(fromDay: "2026-05-01", toDay: "2026-05-31")
+        let all = await repo.daily(fromDay: dayString(daysAgo: 10), toDay: dayString(daysAgo: 0))
         XCTAssertEqual(all, days)
 
         // Narrow window — should get only the later row.
-        let narrow = await repo.daily(fromDay: "2026-05-21", toDay: "2026-05-31")
+        let narrow = await repo.daily(fromDay: dayString(daysAgo: 2), toDay: dayString(daysAgo: 0))
         XCTAssertEqual(narrow, [days[1]])
     }
 
