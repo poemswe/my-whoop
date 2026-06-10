@@ -161,10 +161,16 @@ final class MetricsRepository: ObservableObject {
             let days     = (try? await store.dailyMetrics(deviceId: deviceId,
                                                           from: fromDay, to: toDay)) ?? []
             let workouts = await serverSync?.getWorkouts(from: fromDay, to: toDay) ?? []
+            // Raw HR: last 48 h at ~1-min resolution — enough for the Health HR chart
+            // without rewriting two weeks of samples on every refresh.
+            let hrPoints = await serverSync?.getHRSeries(fromEpoch: now - 48 * 3600,
+                                                         toEpoch: now,
+                                                         maxPoints: 2_880) ?? []
 
             await HealthKitSync.shared.writeSessions(sessions)
             await HealthKitSync.shared.writeMetrics(days)
             await HealthKitSync.shared.writeWorkouts(workouts)
+            await HealthKitSync.shared.writeHeartRate(hrPoints)
         }
 
         isRefreshing = false

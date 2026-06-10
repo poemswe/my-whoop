@@ -24,6 +24,7 @@ final class HealthKitSync {
 
     private static let writeTypes: Set<HKSampleType> = [
         HKCategoryType(.sleepAnalysis),
+        HKQuantityType(.heartRate),
         HKQuantityType(.heartRateVariabilitySDNN),
         HKQuantityType(.restingHeartRate),
         HKQuantityType(.oxygenSaturation),
@@ -82,6 +83,31 @@ final class HealthKitSync {
             await deleteExisting(types: [type], from: fromEpoch, to: toEpoch)
             do { try await store.save(samples) } catch {}
         }
+    }
+
+    // MARK: - Write raw HR series (downsampled)
+
+    func writeHeartRate(_ points: [(ts: Int, bpm: Int)]) async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        await requestAuthorizationIfNeeded()
+        guard !points.isEmpty else { return }
+
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let type = HKQuantityType(.heartRate)
+        let samples = points.compactMap { p -> HKQuantitySample? in
+            guard p.bpm > 0 else { return nil }
+            let date = Date(timeIntervalSince1970: TimeInterval(p.ts))
+            return HKQuantitySample(type: type,
+                                    quantity: HKQuantity(unit: unit, doubleValue: Double(p.bpm)),
+                                    start: date, end: date,
+                                    metadata: [HKMetadataKeyWasUserEntered: false])
+        }
+        guard !samples.isEmpty else { return }
+
+        let minTs = points.map { $0.ts }.min()!
+        let maxTs = points.map { $0.ts }.max()!
+        await deleteExisting(types: [type], from: minTs, to: maxTs)
+        do { try await store.save(samples) } catch {}
     }
 
     // MARK: - Write workouts
