@@ -697,3 +697,31 @@ final class ServerSyncTests: XCTestCase {
         XCTAssertFalse(ok, "backfillWorkouts must return false on non-2xx")
     }
 }
+
+// MARK: - getSleepRange (single ranged call)
+
+extension ServerSyncTests {
+
+    func testGetSleepRangeParsesSessionsAcrossDays() async throws {
+        let body = """
+        [{"start_ts":"2026-05-22T23:05:00+00:00","end_ts":"2026-05-23T07:11:00+00:00",
+          "efficiency":0.9,"resting_hr":55,"avg_hrv":80.0,
+          "stages":[{"start":1779836700,"end":1779865860,"stage":"light"}]},
+         {"start_ts":"2026-05-24T01:00:00+00:00","end_ts":"2026-05-24T08:00:00+00:00",
+          "efficiency":0.85,"resting_hr":57,"avg_hrv":75.0,"stages":[]}]
+        """
+        StubURLProtocol.reset(responses: [:], bodies: ["/v1/sleep": body])
+
+        let store = try await WhoopStore.inMemory()
+        let sync = ServerSync(config: makeConfig(), store: store,
+                              deviceId: "my-whoop", session: makeSession())
+        let sessions = await sync.getSleepRange(from: "2026-05-23", to: "2026-05-24")
+        XCTAssertEqual(sessions?.count, 2)
+        XCTAssertEqual(sessions?[0].restingHr, 55)
+        XCTAssertEqual(sessions?[1].restingHr, 57)
+
+        let req = StubURLProtocol.captured.first { $0.url.path.hasSuffix("/v1/sleep") }
+        XCTAssertTrue(req?.url.query?.contains("from=2026-05-23") ?? false)
+        XCTAssertTrue(req?.url.query?.contains("to=2026-05-24") ?? false)
+    }
+}

@@ -377,7 +377,16 @@ final class ServerSync {
     }
 
     private func getSleep(date: String) async -> [CachedSleepSession]? {
-        let path = "/v1/sleep?device=\(deviceId)&date=\(date)"
+        await getSleepPath("/v1/sleep?device=\(deviceId)&date=\(date)")
+    }
+
+    /// One ranged call covering [from, to] (YYYY-MM-DD, inclusive) — replaces the
+    /// per-day fan-out (~61 requests per refresh → 1). Same response shape.
+    func getSleepRange(from: String, to: String) async -> [CachedSleepSession]? {
+        await getSleepPath("/v1/sleep?device=\(deviceId)&from=\(from)&to=\(to)")
+    }
+
+    private func getSleepPath(_ path: String) async -> [CachedSleepSession]? {
         guard let body = await get(path: path),
               let obj = try? JSONSerialization.jsonObject(with: body) else {
             return nil
