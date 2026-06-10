@@ -285,6 +285,59 @@ def spo2_percent_window(
     return _spo2_from_R(R, a, b)
 
 
+# ── Nightly aggregate with pulsatile-coverage gate ──────────────────────────
+
+#: Window length (samples at 1 Hz) for the nightly windowed estimators.
+_NIGHTLY_WINDOW_S: int = 120
+#: Minimum fraction of windows that must yield a valid estimate before the
+#: nightly aggregate is trusted. Below this the channel is a flat / stepped
+#: aggregate (no waveform) and any estimate is artefact, not physiology.
+_NIGHTLY_MIN_COVERAGE: float = 0.30
+
+
+def spo2_percent_nightly(
+    reds: Sequence[float],
+    irs: Sequence[float],
+    *,
+    a: float = SPO2_A,
+    b: float = SPO2_B,
+    window_s: int = _NIGHTLY_WINDOW_S,
+    min_coverage: float = _NIGHTLY_MIN_COVERAGE,
+) -> Optional[float]:
+    """
+    APPROXIMATE — nightly SpO2 as the median of per-window ratio-of-ratios
+    estimates, gated on pulsatile coverage.
+
+    Method: split the night into ``window_s``-sample windows, compute R per
+    window via ``spo2_feature_window`` (which motion-rejects), take the MEDIAN
+    R over accepted windows, and map once via SpO2 = a − b·R.
+
+    COVERAGE GATE — returns None when fewer than ``min_coverage`` of the
+    windows yield a valid R. EMPIRICAL (2026-06 audit, real WHOOP 4.0 type-47
+    data): the 1 Hz red/IR channels are flat step-aggregates (2-min window
+    std == 0 for >85 % of windows — no pulsatile AC exists at 1 Hz), so the
+    whole-night MAD measured drift and clamped the estimate at the 70 % floor.
+    The gate keeps the estimator honest: no waveform → no number.
+
+    Returns:
+        Median-window SpO2 in percent (clamped [70, 100]) or None when the
+        night is too short or pulsatile coverage is insufficient.
+    """
+    n = min(len(reds), len(irs))
+    if n < window_s:
+        return None
+    r_values: list[float] = []
+    n_windows = 0
+    for i in range(0, n - window_s + 1, window_s):
+        n_windows += 1
+        R = spo2_feature_window(list(reds[i:i + window_s]), list(irs[i:i + window_s]))
+        if R is not None:
+            r_values.append(R)
+    if n_windows == 0 or len(r_values) / n_windows < min_coverage:
+        return None
+    return _spo2_from_R(float(np.median(r_values)), a, b)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # §2  Skin temperature
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -428,6 +481,40 @@ def resp_rate_from_signal(
         return _resp_rate_nk2_xcorr(arr, fs=fs)
 
     return _resp_rate_welch(arr, fs=fs, nperseg=nperseg)
+
+
+def resp_rate_nightly(
+    signal: Sequence[float],
+    *,
+    fs: float = 1.0,
+    window_s: int = _NIGHTLY_WINDOW_S,
+    min_coverage: float = _NIGHTLY_MIN_COVERAGE,
+) -> Optional[float]:
+    """
+    APPROXIMATE — nightly respiratory rate via Welch, gated on waveform presence.
+
+    WAVEFORM GATE — returns None when fewer than ``min_coverage`` of the
+    ``window_s``-sample windows show any variation (std > 0). EMPIRICAL
+    (2026-06 audit, real WHOOP 4.0 type-47 data): the resp raw channel is an
+    essentially CONSTANT aggregate (~3067 counts, unchanged between sleep at
+    HR 56 and exercise at HR 116 — a real respiratory signal would double).
+    Welch on that channel returns the band-edge noise floor (6–7.5 BrPM),
+    which is artefact. The gate keeps the estimator honest: no waveform → no
+    number. If a future decoder exposes a true resp waveform, the estimate
+    comes back automatically.
+    """
+    arr = np.asarray(signal, dtype=float)
+    if arr.size < window_s:
+        return None
+    n_windows = 0
+    n_active = 0
+    for i in range(0, arr.size - window_s + 1, window_s):
+        n_windows += 1
+        if float(np.std(arr[i:i + window_s])) > 0.0:
+            n_active += 1
+    if n_windows == 0 or n_active / n_windows < min_coverage:
+        return None
+    return resp_rate_from_signal(arr, fs=fs)
 
 
 def _resp_rate_welch(arr: np.ndarray, *, fs: float = 1.0,

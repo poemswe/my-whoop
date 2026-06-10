@@ -24,8 +24,10 @@ from app.analysis.units import (
     resp_rate_bpm,
     # New API
     spo2_feature_window,
+    spo2_percent_nightly,
     skin_temp_deviation,
     resp_rate_from_signal,
+    resp_rate_nightly,
     # Calibration-fitting routines
     fit_spo2,
     fit_skin_temp,
@@ -559,6 +561,70 @@ class TestRespRateFromSignal:
 # ---------------------------------------------------------------------------
 # fit_spo2 — calibration fitting (linear, LONO)
 # ---------------------------------------------------------------------------
+
+class TestSpo2PercentNightly:
+    """Median-of-windows nightly SpO2 with the pulsatile-coverage gate."""
+
+    @staticmethod
+    def _pulsatile_night(n: int = 1200, seed: int = 0) -> tuple[list, list]:
+        """red/IR with a small per-sample pulsatile AC on a stable DC."""
+        rng = np.random.default_rng(seed)
+        t = np.arange(n)
+        red = 500.0 + 5.0 * np.sin(2 * np.pi * 0.02 * t) + rng.normal(0, 1.0, n)
+        ir = 600.0 + 4.0 * np.sin(2 * np.pi * 0.02 * t) + rng.normal(0, 1.0, n)
+        return red.tolist(), ir.tolist()
+
+    def test_pulsatile_night_returns_value_in_range(self):
+        reds, irs = self._pulsatile_night()
+        v = spo2_percent_nightly(reds, irs)
+        assert v is not None
+        assert 70.0 <= v <= 100.0
+
+    def test_flat_channels_gated_to_none(self):
+        """Flat step-aggregate channels (the real type-47 shape) → None."""
+        reds = [500.0] * 1200
+        irs = [610.0] * 1200
+        assert spo2_percent_nightly(reds, irs) is None
+
+    def test_too_short_night_returns_none(self):
+        reds, irs = self._pulsatile_night(n=60)
+        assert spo2_percent_nightly(reds, irs) is None
+
+    def test_low_coverage_gated_to_none(self):
+        """Mostly-flat night with one pulsatile window fails the coverage gate."""
+        reds = [500.0] * 1200
+        irs = [610.0] * 1200
+        p_red, p_ir = self._pulsatile_night(n=120)
+        reds[:120], irs[:120] = p_red, p_ir
+        assert spo2_percent_nightly(reds, irs) is None
+
+
+class TestRespRateNightly:
+    """Welch nightly resp rate with the waveform-presence gate."""
+
+    @staticmethod
+    def _waveform(bpm: float, n: int = 1200) -> list:
+        t = np.arange(n)
+        return (np.sin(2 * np.pi * (bpm / 60.0) * t) * 100.0).tolist()
+
+    def test_waveform_returns_rate(self):
+        rate = resp_rate_nightly(self._waveform(15.0))
+        assert rate is not None
+        assert 13.0 <= rate <= 17.0
+
+    def test_constant_channel_gated_to_none(self):
+        """The real type-47 resp shape (constant ~3067 counts) → None."""
+        assert resp_rate_nightly([3067.0] * 1200) is None
+
+    def test_stepped_aggregate_gated_to_none(self):
+        """Flat with occasional steps (< coverage fraction active) → None."""
+        sig = [3067.0] * 1200
+        sig[600:660] = [3100.0 + i for i in range(60)]
+        assert resp_rate_nightly(sig) is None
+
+    def test_too_short_returns_none(self):
+        assert resp_rate_nightly(self._waveform(15.0, n=60)) is None
+
 
 class TestFitSpo2:
     """Fitting routines recover known (a, b) from synthetic data."""

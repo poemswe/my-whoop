@@ -78,9 +78,12 @@ final class HealthKitSync {
             (HKQuantityType(.oxygenSaturation), days.compactMap { makeSpO2Sample(for: $0) }),
             (HKQuantityType(.respiratoryRate),  days.compactMap { makeRespRateSample(for: $0) }),
         ]
+        // Delete unconditionally: when the server stops emitting a signal (e.g. it
+        // was gated as untrustworthy), previously-written samples must be evicted
+        // too, not just overwritten.
         for (type, samples) in typeGroups {
-            guard !samples.isEmpty else { continue }
             await deleteExisting(types: [type], from: fromEpoch, to: toEpoch)
+            guard !samples.isEmpty else { continue }
             do { try await store.save(samples) } catch {}
         }
     }

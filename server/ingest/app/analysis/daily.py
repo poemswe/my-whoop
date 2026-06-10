@@ -268,15 +268,15 @@ def _nightly_signals(
     def _in_night(rows: list[dict]) -> list[dict]:
         return [r for r in rows if night_start <= r["ts"] <= night_end]
 
-    # SpO2 — windowed AC/DC ratio over the whole night's red/IR.
+    # SpO2 — median of 2-min windowed ratio-of-ratios, gated on pulsatile
+    # coverage (None when the red/IR channels carry no waveform — see
+    # units.spo2_percent_nightly for the empirical audit notes).
     spo2_rows = _in_night(streams.get("spo2") or [])
     reds = [float(r["red"]) for r in spo2_rows if r.get("red") is not None]
     irs = [float(r["ir"]) for r in spo2_rows if r.get("ir") is not None]
     if len(reds) >= 2 and len(reds) == len(irs):
-        try:
-            out["spo2_pct"] = round(_units.spo2_percent_window(reds, irs), 1)
-        except (ZeroDivisionError, ValueError):
-            out["spo2_pct"] = None
+        spo2_val = _units.spo2_percent_nightly(reds, irs)
+        out["spo2_pct"] = round(spo2_val, 1) if spo2_val is not None else None
 
     # Skin-temp deviation — tonight's mean raw vs trailing baseline raw.
     st_rows = _in_night(streams.get("skin_temp") or [])
@@ -288,11 +288,13 @@ def _nightly_signals(
             dev = _units.skin_temp_deviation([mean_raw], baseline_raw)[0]
             out["skin_temp_dev_c"] = round(dev, 2)
 
-    # Respiratory rate — Welch-peak over the night's resp waveform.
+    # Respiratory rate — Welch-peak gated on waveform presence (None when the
+    # resp channel is a flat aggregate — see units.resp_rate_nightly for the
+    # empirical audit notes).
     resp_rows = _in_night(streams.get("resp") or [])
     resp_sig = [float(r["raw"]) for r in resp_rows if r.get("raw") is not None]
     if len(resp_sig) >= 2:
-        rr = _units.resp_rate_from_signal(resp_sig)
+        rr = _units.resp_rate_nightly(resp_sig)
         out["resp_rate_bpm"] = round(rr, 1) if rr is not None else None
 
     return out
