@@ -30,8 +30,11 @@ background refresh (DONE). Spec + plan in `docs/superpowers/`. Awaiting merge.
 - WHOOP data export would unlock calibration (`fit_spo2`, `fit_skin_temp`) and
   a staging-accuracy check; without it staging is plausibility-validated only.
 - Two-strap device picker still hardcoded to one device id.
-- Type-47 frame layout worth re-examining — "spo2"/"resp" fields may be
-  mislabeled rather than truly dead.
+- SpO2/resp accuracy: RESOLVED as a ceiling, not a bug (2026-06-11). The
+  type-47 history carries 1 Hz DSP aggregates, not the pulsatile PPG waveform
+  ratio-of-ratios needs — that lives in a live optical frame the history
+  offload never delivers. Gating to null is correct and final. Do not re-chase
+  via the decoder. See memory project-spo2-resp-ceiling.
 
 ## Gotchas
 
