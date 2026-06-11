@@ -2,9 +2,19 @@ import SwiftUI
 
 @main
 struct OpenWhoopApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        BackgroundRefresh.register()
+    }
+
     var body: some Scene {
         WindowGroup {
             AppRoot()
+        }
+        .onChange(of: scenePhase) { phase in
+            // Schedule on backgrounding — the recommended submission point.
+            if phase == .background { BackgroundRefresh.schedule() }
         }
     }
 }

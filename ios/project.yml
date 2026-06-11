@@ -36,6 +36,9 @@ targets:
           server on your local network for analysis.
         UIBackgroundModes:
           - bluetooth-central
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.poemswe.mywhoop.refresh
         WHOOP_BASE_URL: $(WHOOP_BASE_URL)
         WHOOP_API_KEY: $(WHOOP_API_KEY)
         WHOOP_DEVICE_ID: $(WHOOP_DEVICE_ID)
