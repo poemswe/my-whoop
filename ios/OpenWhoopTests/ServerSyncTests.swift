@@ -186,9 +186,20 @@ final class ServerSyncTests: XCTestCase {
         "light_min":220,"disturbances":3,"resting_hr":53,"avg_hrv":60.0,"recovery":66.0,\
         "strain":12.3,"exercise_count":1}]
         """
+        // Session must END on the daily row's day: pullDerived groups the ranged
+        // /v1/sleep response by UTC end-day and only upserts groups matching a
+        // daily-metric day. (The old per-day fan-out echoed this body for ANY
+        // date, which let a mismatched end date slip through.)
+        let sessionStart = fmt.date(from: today)!.addingTimeInterval(1 * 3600)
+        let sessionEnd   = fmt.date(from: today)!.addingTimeInterval(8 * 3600)
+        let isoFmt = ISO8601DateFormatter()
+        let sleepStartISO = isoFmt.string(from: sessionStart)
+        let sleepEndISO   = isoFmt.string(from: sessionEnd)
+        let sStart = Int(sessionStart.timeIntervalSince1970)
+        let sEnd   = Int(sessionEnd.timeIntervalSince1970)
         let sleepBody = """
-        {"start_ts":"\(isoA)","end_ts":"\(isoB)","efficiency":0.92,"resting_hr":52,"avg_hrv":65.5,\
-        "stages":[{"start":\(epochA),"end":\(epochB),"stage":"deep"}]}
+        {"start_ts":"\(sleepStartISO)","end_ts":"\(sleepEndISO)","efficiency":0.92,"resting_hr":52,"avg_hrv":65.5,\
+        "stages":[{"start":\(sStart),"end":\(sEnd),"stage":"deep"}]}
         """
         StubURLProtocol.reset(bodies: [
             "/v1/daily": dailyBody,
@@ -210,12 +221,11 @@ final class ServerSyncTests: XCTestCase {
         // Server's 0–100 score must be normalized to the app's 0–1 contract.
         XCTAssertEqual(try XCTUnwrap(days[0].recovery), 0.66, accuracy: 1e-6)
 
-        // /v1/sleep is queried per-day over the window; the same body is returned each call, so the
-        // single session (natural key startTs=epochA) is upserted once (dedup across days).
+        // /v1/sleep is queried ONCE over the window; the session lands on its end-day.
         let sleeps = try await store.sleepSessions(deviceId: "my-whoop", from: 0, to: Int.max, limit: 100)
         XCTAssertEqual(sleeps.count, 1)
-        XCTAssertEqual(sleeps[0].startTs, epochA)
-        XCTAssertEqual(sleeps[0].endTs, epochB)
+        XCTAssertEqual(sleeps[0].startTs, sStart)
+        XCTAssertEqual(sleeps[0].endTs, sEnd)
         XCTAssertEqual(sleeps[0].efficiency, 0.92)
         XCTAssertEqual(sleeps[0].restingHr, 52)
         XCTAssertNotNil(sleeps[0].stagesJSON)
@@ -287,7 +297,12 @@ final class ServerSyncTests: XCTestCase {
         fmt.calendar = cal; fmt.timeZone = TimeZone(identifier: "UTC"); fmt.dateFormat = "yyyy-MM-dd"
         let today = fmt.string(from: Date())
         let dailyBody = "[{\"day\":\"\(today)\",\"total_sleep_min\":480.0}]"
-        let sleepBody = "{\"start_ts\":\"\(isoA)\",\"end_ts\":\"\(isoB)\"}"
+        // The session must END on `today` or the end-day grouping in pullDerived
+        // (correctly) discards it as belonging to no daily-metric day.
+        let isoFmt = ISO8601DateFormatter()
+        let sleepStartISO = isoFmt.string(from: fmt.date(from: today)!.addingTimeInterval(3600))
+        let sleepEndISO   = isoFmt.string(from: fmt.date(from: today)!.addingTimeInterval(8 * 3600))
+        let sleepBody = "{\"start_ts\":\"\(sleepStartISO)\",\"end_ts\":\"\(sleepEndISO)\"}"
 
         StubURLProtocol.reset(bodies: [
             "/v1/streams/hr": hrBody,
@@ -723,5 +738,82 @@ extension ServerSyncTests {
         let req = StubURLProtocol.captured.first { $0.url.path.hasSuffix("/v1/sleep") }
         XCTAssertTrue(req?.url.query?.contains("from=2026-05-23") ?? false)
         XCTAssertTrue(req?.url.query?.contains("to=2026-05-24") ?? false)
+    }
+}
+
+// MARK: - pullDerived uses ONE ranged sleep call + evicts stale days
+
+extension ServerSyncTests {
+
+    func testPullDerivedSingleSleepCallGroupsByDay() async throws {
+        let daily = """
+        [{"day":"2026-05-23"},{"day":"2026-05-24"}]
+        """
+        let sleep = """
+        [{"start_ts":"2026-05-22T23:05:00+00:00","end_ts":"2026-05-23T07:11:00+00:00",
+          "efficiency":0.9,"resting_hr":55,"avg_hrv":80.0,"stages":[]},
+         {"start_ts":"2026-05-24T01:00:00+00:00","end_ts":"2026-05-24T08:00:00+00:00",
+          "efficiency":0.85,"resting_hr":57,"avg_hrv":75.0,"stages":[]}]
+        """
+        StubURLProtocol.reset(responses: [:],
+                              bodies: ["/v1/daily": daily, "/v1/sleep": sleep])
+
+        let store = try await WhoopStore.inMemory()
+        let sync = ServerSync(config: makeConfig(), store: store,
+                              deviceId: "my-whoop", session: makeSession())
+        await sync.pullDerived()
+
+        let cached = try await store.sleepSessions(deviceId: "my-whoop",
+                                                   from: 0, to: Int.max, limit: 50)
+        XCTAssertEqual(cached.count, 2)
+
+        let sleepCalls = StubURLProtocol.captured.filter { $0.url.path.hasSuffix("/v1/sleep") }
+        XCTAssertEqual(sleepCalls.count, 1, "must be ONE ranged call, not per-day fan-out")
+    }
+
+    func testPullDerivedEvictsDayServerNoLongerReports() async throws {
+        // Pre-seed a stale session ending 2026-05-23; server's daily window includes
+        // that day but the ranged sleep response has NO session for it.
+        let store = try await WhoopStore.inMemory()
+        let stale = CachedSleepSession(startTs: ServerSync.parseEpoch("2026-05-22T23:00:00Z")!,
+                                       endTs: ServerSync.parseEpoch("2026-05-23T05:00:00Z")!,
+                                       efficiency: 0.5, restingHr: 70, avgHrv: 40,
+                                       stagesJSON: nil)
+        try await store.upsertSleepSessions([stale], deviceId: "my-whoop")
+
+        let daily = """
+        [{"day":"2026-05-23"}]
+        """
+        StubURLProtocol.reset(responses: [:],
+                              bodies: ["/v1/daily": daily, "/v1/sleep": "[]"])
+        let sync = ServerSync(config: makeConfig(), store: store,
+                              deviceId: "my-whoop", session: makeSession())
+        await sync.pullDerived()
+
+        let cached = try await store.sleepSessions(deviceId: "my-whoop",
+                                                   from: 0, to: Int.max, limit: 50)
+        XCTAssertTrue(cached.isEmpty, "stale session must be evicted")
+    }
+
+    func testPullDerivedSleepFailureLeavesCacheUntouched() async throws {
+        let store = try await WhoopStore.inMemory()
+        let existing = CachedSleepSession(startTs: ServerSync.parseEpoch("2026-05-22T23:00:00Z")!,
+                                          endTs: ServerSync.parseEpoch("2026-05-23T05:00:00Z")!,
+                                          efficiency: 0.5, restingHr: 70, avgHrv: 40,
+                                          stagesJSON: nil)
+        try await store.upsertSleepSessions([existing], deviceId: "my-whoop")
+
+        let daily = """
+        [{"day":"2026-05-23"}]
+        """
+        StubURLProtocol.reset(responses: ["/v1/sleep": 500],
+                              bodies: ["/v1/daily": daily])
+        let sync = ServerSync(config: makeConfig(), store: store,
+                              deviceId: "my-whoop", session: makeSession())
+        await sync.pullDerived()
+
+        let cached = try await store.sleepSessions(deviceId: "my-whoop",
+                                                   from: 0, to: Int.max, limit: 50)
+        XCTAssertEqual(cached.count, 1, "failed range call must not delete anything")
     }
 }

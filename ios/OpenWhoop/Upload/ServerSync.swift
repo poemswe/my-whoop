@@ -331,16 +331,22 @@ final class ServerSync {
             do { try await store.upsertDailyMetrics(days, deviceId: deviceId) } catch {}
         }
 
-        // /v1/sleep is per-date; fetch ONLY the days that appear in /v1/daily (days with computed
-        // metrics) rather than every calendar day in the window.
-        // Delete-then-upsert: stale sessions (recomputed, truncated, or removed false-positives)
-        // must be evicted from GRDB before inserting the fresh server list so orphaned rows don't
-        // survive across recomputes.
+        // ONE ranged /v1/sleep call covering the whole window, then group the
+        // returned sessions by UTC end-day. Delete-then-upsert per daily-metric
+        // day: stale sessions (recomputed, truncated, removed false-positives)
+        // are evicted even when the server now reports NO sessions for a day.
+        // If the range call fails entirely, skip all deletes — a stale cache
+        // beats data loss.
+        guard let sessions = await getSleepRange(from: fromDay, to: toDay) else { return }
+        var byDay: [String: [CachedSleepSession]] = [:]
+        for s in sessions {
+            let day = fmt.string(from: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
+            byDay[day, default: []].append(s)
+        }
         for metric in days {
-            guard let sessions = await getSleep(date: metric.day) else { continue }
             do { try await store.deleteSessionsForDay(deviceId: deviceId, day: metric.day) } catch {}
-            if !sessions.isEmpty {
-                do { try await store.upsertSleepSessions(sessions, deviceId: deviceId) } catch {}
+            if let group = byDay[metric.day], !group.isEmpty {
+                do { try await store.upsertSleepSessions(group, deviceId: deviceId) } catch {}
             }
         }
     }
