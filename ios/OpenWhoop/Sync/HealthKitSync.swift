@@ -16,11 +16,29 @@ import WhoopStore
 //   fallback → .asleepUnspecified
 
 @MainActor
-final class HealthKitSync {
+final class HealthKitSync: ObservableObject {
     static let shared = HealthKitSync()
+
+    /// Last fully-successful write pass. A pass = the begin/end bracket around all
+    /// HealthKit writes in one MetricsRepository.refresh().
+    @Published private(set) var lastSyncAt: Date?
+    /// Most recent write error within the current/last pass; nil after a clean pass.
+    @Published private(set) var lastSyncError: String?
 
     private let store = HKHealthStore()
     private var authorized = false
+
+    // MARK: - Sync-pass state
+
+    /// Called at the start of a refresh's HealthKit writes.
+    func beginSyncPass() { lastSyncError = nil }
+
+    /// Called after the last write of a pass; a pass with no recorded error is a success.
+    func endSyncPass() {
+        if lastSyncError == nil { lastSyncAt = Date() }
+    }
+
+    func record(_ error: Error) { lastSyncError = error.localizedDescription }
 
     private static let writeTypes: Set<HKSampleType> = [
         HKCategoryType(.sleepAnalysis),
@@ -60,7 +78,7 @@ final class HealthKitSync {
         await deleteExisting(types: [HKCategoryType(.sleepAnalysis),
                                      HKQuantityType(.heartRateVariabilitySDNN)],
                              from: minStart, to: maxEnd)
-        do { try await store.save(samples) } catch {}
+        do { try await store.save(samples) } catch { record(error) }
     }
 
     // MARK: - Write daily metrics (resting HR, SpO2, respiratory rate)
@@ -84,7 +102,7 @@ final class HealthKitSync {
         for (type, samples) in typeGroups {
             await deleteExisting(types: [type], from: fromEpoch, to: toEpoch)
             guard !samples.isEmpty else { continue }
-            do { try await store.save(samples) } catch {}
+            do { try await store.save(samples) } catch { record(error) }
         }
     }
 
@@ -110,7 +128,7 @@ final class HealthKitSync {
         let minTs = points.map { $0.ts }.min()!
         let maxTs = points.map { $0.ts }.max()!
         await deleteExisting(types: [type], from: minTs, to: maxTs)
-        do { try await store.save(samples) } catch {}
+        do { try await store.save(samples) } catch { record(error) }
     }
 
     // MARK: - Write workouts
@@ -126,7 +144,7 @@ final class HealthKitSync {
         let minStart = workouts.map { $0.startTs }.min()!
         let maxEnd   = workouts.map { $0.endTs }.max()!
         await deleteExisting(types: [HKObjectType.workoutType()], from: minStart, to: maxEnd)
-        do { try await store.save(samples) } catch {}
+        do { try await store.save(samples) } catch { record(error) }
     }
 
     // MARK: - Sleep sample construction

@@ -167,10 +167,12 @@ final class MetricsRepository: ObservableObject {
                                                          toEpoch: now,
                                                          maxPoints: 2_880) ?? []
 
+            await HealthKitSync.shared.beginSyncPass()
             await HealthKitSync.shared.writeSessions(sessions)
             await HealthKitSync.shared.writeMetrics(days)
             await HealthKitSync.shared.writeWorkouts(workouts)
             await HealthKitSync.shared.writeHeartRate(hrPoints)
+            await HealthKitSync.shared.endSyncPass()
         }
 
         isRefreshing = false
