@@ -77,6 +77,7 @@ private enum ProfileStorage {
 
 struct SettingsView: View {
     @EnvironmentObject private var metrics: MetricsRepository
+    @ObservedObject private var health = HealthKitSync.shared
 
     // Unit system
     @State private var unitSystem: UnitSystem = .imperial
@@ -139,6 +140,7 @@ struct SettingsView: View {
                 ageSection
                 sexSection
                 saveSection
+                healthSection
                 footerSection
             }
             .scrollContentBackground(.hidden)
@@ -293,6 +295,21 @@ struct SettingsView: View {
                     Spacer()
                 }
                 .listRowBackground(Color.clear)
+            }
+        }
+    }
+
+    private var healthSection: some View {
+        Section("Apple Health") {
+            if let err = health.lastSyncError {
+                Label(err, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+            } else if let at = health.lastSyncAt {
+                Label("Synced \(at.formatted(date: .omitted, time: .shortened))",
+                      systemImage: "heart.fill")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Not synced yet").foregroundStyle(.secondary)
             }
         }
     }
