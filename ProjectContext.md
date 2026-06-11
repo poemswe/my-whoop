@@ -45,3 +45,6 @@ background refresh (DONE). Spec + plan in `docs/superpowers/`. Awaiting merge.
 - Simulator for iOS tests: iPhone SE 3rd gen, id
   `779D837A-2C06-4CAE-A5D8-3E0826593058` (OS 18.3.1).
 - iOS 26.5 device runtime must be installed in Xcode for device installs.
+- `xcodebuild test` on the simulator STRIPS the HealthKit key from
+  OpenWhoop.entitlements (automatic signing rewrite). Check `git status` after
+  simulator test runs and restore with `git checkout ios/OpenWhoop/OpenWhoop.entitlements`.
