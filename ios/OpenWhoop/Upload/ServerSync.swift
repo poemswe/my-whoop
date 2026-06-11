@@ -92,7 +92,7 @@ final class ServerSync {
         return true
     }
 
-    // MARK: - JSON coercion helpers (shared by buildStreams / getDaily / getSleep)
+    // MARK: - JSON coercion helpers (shared by buildStreams / getDaily / getSleepPath)
 
     /// Coerce a JSON value (NSNumber from JSONSerialization, or a plain Int) to Int.
     static func int(_ r: [String: Any], _ k: String) -> Int? {
@@ -380,10 +380,6 @@ final class ServerSync {
                                skinTempDevC: dbl(r, "skin_temp_dev_c") ?? dbl(r, "skinTempDevC"),
                                respRateBpm: dbl(r, "resp_rate_bpm") ?? dbl(r, "respRateBpm"))
         }
-    }
-
-    private func getSleep(date: String) async -> [CachedSleepSession]? {
-        await getSleepPath("/v1/sleep?device=\(deviceId)&date=\(date)")
     }
 
     /// One ranged call covering [from, to] (YYYY-MM-DD, inclusive) — replaces the
