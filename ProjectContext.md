@@ -2,13 +2,22 @@
 
 Rolling state. Prune entries older than ~3 weeks after each milestone.
 
-## Current focus (2026-06-10)
+## Current focus (2026-06-11)
 
-`feat/sync-improvements` branch (worktree `.worktrees/feat-sync-improvements`):
-sleep-fetch batching (DONE), HealthKit error surfacing (DONE), BGAppRefreshTask
-background refresh (DONE). Spec + plan in `docs/superpowers/`. Awaiting merge.
+Accuracy/parity pass on main. Sync-improvements milestone merged. Recovery
+cold-start bug fixed (f2ac799). UI: recovery ring count-up animation (5c58c25).
 
 ## Recent decisions
+
+- Recovery now returns None (calibrating) when the HRV baseline is absent, not
+  just when it's an untrusted BaselineState. Day-one was surfacing a fake ~48%
+  from sleep-efficiency alone. Real data Jun 4-11: Jun 4-7 null (cold-start,
+  <4 baseline nights), Jun 8-11 score — matches WHOOP's 4-day calibration.
+  WATCH: with only 4-5 provisional baseline nights, recovery reads 98-99% on
+  high-HRV nights — cold-start regime working as designed but feels
+  overconfident; revisit if a ground-truth export lets us regularize early scores.
+- `/v1/sleep` gained `from`/`to` range mode; `date` mode kept for compat.
+  Refresh dropped from ~61 HTTP calls to 2.
 
 - `/v1/sleep` gained `from`/`to` range mode; `date` mode kept for compat.
   Refresh dropped from ~61 HTTP calls to 2.
