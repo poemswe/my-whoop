@@ -143,7 +143,11 @@ final class MetricsRepository: ObservableObject {
         await serverSync?.pullDerived()
         await load()
 
-        if let store {
+        // Mirror to Apple Health only when a server sync is configured: with no
+        // serverSync there is no fresh server data to mirror, and touching
+        // HealthKit (auth + writes) from a headless context — e.g. the unit-test
+        // host — can block on an authorization prompt that never resolves.
+        if let store, serverSync != nil {
             let now = Int(Date().timeIntervalSince1970)
             let windowStart = now - 14 * 86_400
             let windowEnd   = now + 86_400
