@@ -279,6 +279,15 @@ def recovery_score(
     else:
         raw_hrv_val = getattr(baselines, "hrv", None)
 
+    # HRV is the dominant driver (W=0.60). Without a usable HRV baseline there is
+    # no meaningful recovery, so cold-start → None in BOTH of these cases:
+    #   • absent baseline (None): the first nights, before any history exists — a
+    #     score built from sleep-efficiency alone is not a recovery score;
+    #   • an untrusted BaselineState (< MIN_NIGHTS_SEED valid nights).
+    # Legacy plain-float / object baselines (raw_hrv_val is a float) bypass the
+    # gate intentionally — those callers opt out of cold-start handling.
+    if raw_hrv_val is None:
+        return None
     if isinstance(raw_hrv_val, BaselineState) and not raw_hrv_val.usable:
         return None  # cold-start: HRV baseline not yet usable (< MIN_NIGHTS_SEED valid nights)
 

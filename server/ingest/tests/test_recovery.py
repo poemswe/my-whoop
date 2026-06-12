@@ -258,6 +258,15 @@ class TestRecoveryScoreColdStart:
         r = recovery_score(55.0, 58.0, 14.0, {})
         assert r is None
 
+    def test_absent_hrv_baseline_with_sleep_perf_returns_none(self):
+        """Regression: on the first nights there is no history, so the dominant HRV
+        baseline is absent (None). Even when a sleep_perf term is available, recovery
+        must be None — a sleep-efficiency-only number is not a recovery score. (Bug:
+        day-one returned ~48 from efficiency alone instead of 'calibrating'.)"""
+        baselines = {"hrv": None, "resting_hr": None, "resp": None}
+        r = recovery_score(95.0, 55.0, None, baselines, sleep_perf=0.83)
+        assert r is None
+
     def test_none_baselines_returns_none(self):
         r = recovery_score(55.0, 58.0, 14.0, None)
         assert r is None
