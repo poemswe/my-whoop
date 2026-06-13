@@ -288,14 +288,21 @@ def _nightly_signals(
             dev = _units.skin_temp_deviation([mean_raw], baseline_raw)[0]
             out["skin_temp_dev_c"] = round(dev, 2)
 
-    # Respiratory rate — Welch-peak gated on waveform presence (None when the
-    # resp channel is a flat aggregate — see units.resp_rate_nightly for the
-    # empirical audit notes).
-    resp_rows = _in_night(streams.get("resp") or [])
-    resp_sig = [float(r["raw"]) for r in resp_rows if r.get("raw") is not None]
-    if len(resp_sig) >= 2:
-        rr = _units.resp_rate_nightly(resp_sig)
-        out["resp_rate_bpm"] = round(rr, 1) if rr is not None else None
+    # Respiratory rate — PRIMARY: respiratory sinus arrhythmia in the RR-interval
+    # stream (the working path on real WHOOP 4.0 data — the strap's own resp
+    # channel is a flat aggregate). FALLBACK: Welch over the resp waveform, kept
+    # for any device/firmware that does expose a real resp signal. Both gate to
+    # None rather than emit noise.
+    rr_night = _in_night(streams.get("rr") or [])
+    rsa = _units.resp_rate_from_rr_rsa(rr_night)
+    if rsa is not None:
+        out["resp_rate_bpm"] = round(rsa, 1)
+    else:
+        resp_rows = _in_night(streams.get("resp") or [])
+        resp_sig = [float(r["raw"]) for r in resp_rows if r.get("raw") is not None]
+        if len(resp_sig) >= 2:
+            fallback = _units.resp_rate_nightly(resp_sig)
+            out["resp_rate_bpm"] = round(fallback, 1) if fallback is not None else None
 
     return out
 

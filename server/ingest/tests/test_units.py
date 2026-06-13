@@ -28,6 +28,7 @@ from app.analysis.units import (
     skin_temp_deviation,
     resp_rate_from_signal,
     resp_rate_nightly,
+    resp_rate_from_rr_rsa,
     # Calibration-fitting routines
     fit_spo2,
     fit_skin_temp,
@@ -624,6 +625,45 @@ class TestRespRateNightly:
 
     def test_too_short_returns_none(self):
         assert resp_rate_nightly(self._waveform(15.0, n=60)) is None
+
+
+class TestRespRateFromRrRsa:
+    """Respiratory rate from RR-interval RSA (the live, working resp path)."""
+
+    @staticmethod
+    def _rr_rows(resp_bpm: float, dur_s: int = 1800, mean_ms: float = 900.0,
+                 amp_ms: float = 40.0) -> list:
+        """RR rows at ~1 Hz whose interval oscillates at the respiratory frequency
+        (respiratory sinus arrhythmia): HR speeds up on inhale, slows on exhale."""
+        resp_hz = resp_bpm / 60.0
+        rows = []
+        t = 0.0
+        while t < dur_s:
+            rr = mean_ms + amp_ms * np.sin(2 * np.pi * resp_hz * t)
+            rows.append({"ts": float(int(t)), "rr_ms": rr})
+            t += rr / 1000.0
+        return rows
+
+    def test_recovers_known_resp_rate(self):
+        rate = resp_rate_from_rr_rsa(self._rr_rows(15.0))
+        assert rate is not None
+        assert 13.0 <= rate <= 17.0, f"expected ~15 brpm, got {rate}"
+
+    def test_recovers_faster_rate(self):
+        rate = resp_rate_from_rr_rsa(self._rr_rows(18.0))
+        assert rate is not None
+        assert 16.0 <= rate <= 20.0, f"expected ~18 brpm, got {rate}"
+
+    def test_flat_rr_returns_none(self):
+        """No RSA (constant RR) → no respiratory peak → None."""
+        rows = [{"ts": float(i), "rr_ms": 900.0} for i in range(900)]
+        assert resp_rate_from_rr_rsa(rows) is None
+
+    def test_too_few_intervals_returns_none(self):
+        assert resp_rate_from_rr_rsa(self._rr_rows(15.0, dur_s=30)) is None
+
+    def test_empty_returns_none(self):
+        assert resp_rate_from_rr_rsa([]) is None
 
 
 class TestFitSpo2:

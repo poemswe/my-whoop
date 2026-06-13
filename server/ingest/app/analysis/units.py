@@ -418,8 +418,99 @@ def skin_temp_deviation(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §3  Respiratory rate — Welch-peak spectral estimator
+# §3  Respiratory rate
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# --- RSA-derived resp rate (the working path on real WHOOP 4.0 data) ----------
+# The strap's `resp_rate_raw` field is a flat DSP aggregate (no waveform — see
+# resp_rate_nightly's gate). But respiration IS recoverable from respiratory
+# sinus arrhythmia: the heart speeds up on inhale and slows on exhale, so the
+# RR-interval tachogram oscillates at the breathing frequency. We already store
+# the full RR-interval stream, so this needs no extra capture. Verified on real
+# nights (2026-06): stable 18-19 brpm, tight IQR, where the raw channel gave the
+# 6-7.5 brpm band-floor noise.
+
+#: Resample rate (Hz) for the RR tachogram — standard for RSA/EDR analysis.
+_RSA_FS: float = 4.0
+#: Per-window length (s) for the Welch periodogram over the tachogram.
+_RSA_WINDOW_S: int = 300
+#: Respiratory band (Hz) for the RSA peak — the standard HF-HRV band 0.15-0.40 Hz
+#: = 9-24 brpm. The 0.15 Hz floor is deliberate: Mayer waves (blood-pressure
+#: oscillations at ~0.1 Hz) are the known confound for RR-derived respiration and
+#: contaminate below 0.15 Hz, so a low-quality night could otherwise park the
+#: argmax on a ~0.1 Hz artifact (seen on real fragmented nights as a bogus 8 brpm).
+_RSA_BAND_LO: float = 0.15
+_RSA_BAND_HI: float = 0.40
+#: A window's peak must exceed this multiple of the in-band median power to count
+#: as a clear respiratory peak (rejects weak/absent-RSA windows, e.g. deep sleep).
+_RSA_PROMINENCE: float = 3.0
+#: Minimum number of clear-peak windows before a nightly rate is trustworthy.
+_RSA_MIN_WINDOWS: int = 3
+#: RR plausibility bounds (ms) — mirrors hrv.RR_MIN_MS/RR_MAX_MS.
+_RSA_RR_MIN_MS: float = 300.0
+_RSA_RR_MAX_MS: float = 2000.0
+
+
+def resp_rate_from_rr_rsa(
+    rr_rows: Sequence[dict],
+    *,
+    fs: float = _RSA_FS,
+    window_s: int = _RSA_WINDOW_S,
+) -> Optional[float]:
+    """
+    Respiratory rate (breaths/min) from RR-interval respiratory sinus arrhythmia.
+
+    Resamples the RR tachogram to ``fs`` Hz, runs Welch over ``window_s`` windows,
+    and takes the median respiratory-band peak across windows whose peak is clearly
+    prominent (>= _RSA_PROMINENCE x in-band median power). Returns None when there
+    are too few intervals or too few clear-peak windows (no usable RSA — e.g. a
+    constant RR series, or a night dominated by RSA-suppressed deep sleep).
+
+    Args:
+        rr_rows: sequence of {"ts": epoch_seconds, "rr_ms": float} dicts.
+    """
+    pairs = [
+        (float(r["ts"]), float(r["rr_ms"]))
+        for r in rr_rows
+        if r.get("rr_ms") is not None
+        and _RSA_RR_MIN_MS <= float(r["rr_ms"]) <= _RSA_RR_MAX_MS
+    ]
+    if len(pairs) < 2:
+        return None
+    pairs.sort(key=lambda p: p[0])
+    ts = np.array([t for t, _ in pairs], dtype=float)
+    ms = np.array([m for _, m in pairs], dtype=float)
+    span = ts[-1] - ts[0]
+    if span < window_s:
+        return None
+
+    grid = np.arange(ts[0], ts[-1], 1.0 / fs)
+    tach = np.interp(grid, ts, ms)
+
+    win_n = int(window_s * fs)
+    seg_n = int(60 * fs)  # 60 s Welch segments → ~0.017 Hz resolution ≈ 1 brpm
+    rates: list[float] = []
+    for w0 in range(0, len(tach) - win_n + 1, win_n):
+        seg = tach[w0:w0 + win_n]
+        seg = seg - np.mean(seg)
+        if np.allclose(seg, 0.0):
+            continue
+        freqs, psd = welch(seg, fs=fs, nperseg=seg_n, noverlap=seg_n // 2)
+        band = (freqs >= _RSA_BAND_LO) & (freqs <= _RSA_BAND_HI)
+        if not band.any():
+            continue
+        bpsd = psd[band]
+        pk = int(np.argmax(bpsd))
+        if bpsd[pk] < _RSA_PROMINENCE * float(np.median(bpsd)):
+            continue
+        rates.append(float(freqs[band][pk]) * 60.0)
+
+    if len(rates) < _RSA_MIN_WINDOWS:
+        return None
+    return float(np.median(rates))
+
+
+# --- Welch-peak estimator over a 1 Hz waveform (legacy / dead resp channel) ----
 
 # Band limits for breathing frequency (0.1–0.5 Hz = 6–30 BrPM).
 # Respiration (0.1–0.5 Hz) is AT/BELOW the 0.5 Hz Nyquist for 1 Hz sampling — detectable.
