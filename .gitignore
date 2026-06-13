@@ -70,3 +70,4 @@ ios/build/
 fixtures/soak_*.bin
 .worktrees/
 server/packages/whoop-protocol/build/
+my_whoop_data/
