@@ -42,8 +42,19 @@ user's own historical WHOOP ranges? — not night-matched error.
 5. **Resting HR runs ~3 bpm below WHOOP.** Minor; the lowest-5-min-window method
    may dip slightly under WHOOP's. Low priority.
 
-## Next fix (ground-truth-quantified target)
+## Next fix (ground-truth-quantified target) — DONE 2026-06-16 (commit e1aaafe)
 
-Restore per-epoch RRV from the RR-RSA respiratory signal and loosen the REM
-fallback so REM% rises from ~15% toward the personal 28–36% band, with light%
-falling correspondingly. Deep% (~14 vs 18) should stay stable.
+Restored per-epoch RRV from the RR-RSA respiratory signal (spectral entropy of
+the HF band) so the primary REM rule fires. **Result: REM 15% → ~23-25%**, now
+in textbook-normal range; closes ~half the gap to this user's personal 32% via a
+principled mechanism (not threshold tuning). Deep% stayed ~13-15%. The residual
+gap to 32% is this user's personally-high REM; pushing further would be
+overfitting to one distribution without per-epoch ground truth.
+
+## Remaining known gaps (honest ceilings)
+- **SpO2**: impossible (needs red+IR; only green PPG exposed). `docs/.../spo2-resp`.
+- **Workout precision**: HR+motion can't separate moderate workouts from active
+  daily life; coupled to the observed-low HRmax. `docs/.../workout-detection-ceiling`.
+- **Recovery cold-start**: 98-99% on a 4-night provisional baseline; self-corrects
+  as history accumulates past the seed window.
+- **Resting HR ~3 bpm low**: lowest-5-min-window vs WHOOP's method; minor.
