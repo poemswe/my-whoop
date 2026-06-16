@@ -358,6 +358,26 @@ def test_hr_margin_gate_uses_constant():
     assert len(detect_exercises(above_streams, resting_hr=rest, max_hr=190)) == 1
 
 
+def test_moderate_workout_with_partial_zone2_is_detected():
+    """A real but moderate workout — mostly zone 1 with intermittent zone-2+
+    surges — must be detected. Ground truth: WHOOP logged 582 workouts for this
+    user with average HR down to 89 bpm and zone-2+ fractions as low as a few
+    percent; the old 50% zone-2+ gate discarded ~29% of WHOOP's own workouts
+    (the moderate ones — e.g. real Jun-12/13 sessions, avg HR 88-95, that
+    produced zero detections). With the WHOOP-calibrated gate they qualify.
+
+    Construct a 30-min bout: 80% at 95 bpm (zone 1, ~30% HRR) and 20% at 145 bpm
+    (zone 2+, ~67% HRR) → ~20% zone-2+. Below the old 0.50 gate, above 0.10.
+    """
+    rest, mx = 55, 190
+    seg = 6 * 60  # 6-min segments
+    bpms = ([95] * (seg * 4)) + ([145] * seg)  # 24 min zone-1, 6 min zone-2+
+    hr = [{"ts": T0 + i, "bpm": b} for i, b in enumerate(bpms)]
+    streams = {"hr": hr, "gravity": _gravity_active(T0, len(bpms))}
+    sessions = detect_exercises(streams, resting_hr=rest, max_hr=mx)
+    assert len(sessions) == 1, "moderate workout with ~20% zone-2+ must be detected"
+
+
 # ---------------------------------------------------------------------------
 # 10. Merge-gap boundary: active-ts gap vs MERGE_GAP_S
 # ---------------------------------------------------------------------------

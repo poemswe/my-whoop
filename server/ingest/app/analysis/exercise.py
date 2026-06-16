@@ -163,19 +163,22 @@ MERGE_GAP_S: float = 150.0
 
 #: Minimum fraction of a bout's HR samples that must fall in zone 2 or above
 #: (i.e. ≥60% HRR) for the bout to be classified as a workout.  Below this,
-#: the bout is dominated by zone 0/1 (easy walking or daily activity) and is
-#: rejected as noise.
+#: the bout is dominated by zone 0/1 (idle daily activity) and rejected.
 #:
-#: Empirical calibration (ground-truth data, 2026-05-25/26):
-#:   - Every REAL workout: z2+ = 66–100% (worst case: treadmill warmup at 66%)
-#:   - Every noise bout:   z2+ ≤ 43%     (best case: avg92 bpm blip at 43%)
-#:   - Gap between classes: 66% − 43% = 23 percentage points
-#: Threshold of 0.50 (50%) sits cleanly in the middle of that gap.
+#: Calibrated against WHOOP ground truth (this user's export, 582 logged
+#: workouts, 2023-2025). WHOOP logs genuine workouts at avg HR down to 89 bpm
+#: with zone-2+ fractions as low as a few percent: zone-2+ distribution p10=5%,
+#: p25=36%, median=79%. The old 0.50 gate — tuned on a handful of vigorous
+#: 2026-05 sessions — discarded ~29% of WHOOP's own workouts (every moderate one).
+#: On real moderate days (Jun 12/13: avg HR 88-95, real bouts incl. a peak-151
+#: session) it produced ZERO detections. 0.10 recovers 86% of WHOOP's logged
+#: workouts while still rejecting pure-idle (0% zone-2+) activity; moderate bouts
+#: correctly get LOW strain rather than being dropped (WHOOP's model).
 #:
 #: Applied ONLY when zone data can be computed (requires a valid HRmax estimate).
 #: Bouts where HRmax is unknown pass through unfiltered so we never suppress a
 #: real workout merely because the zone math was unavailable.
-MIN_INTENSITY_Z2PLUS: float = 0.50
+MIN_INTENSITY_Z2PLUS: float = 0.10
 
 #: Nearest-ts alignment tolerance (seconds) when binding HR to gravity (and
 #: vice-versa). At 1 Hz, samples within this are treated as coincident. 5 s
