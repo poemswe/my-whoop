@@ -242,6 +242,26 @@ class TestRecoveryScoreColdStart:
         assert r is not None
         assert 0.0 <= r <= 100.0
 
+    def test_provisional_extreme_is_shrunk_toward_population_mean(self):
+        """A far-above-baseline HRV on a thin (4-night) baseline must NOT yield a
+        near-max score — a tiny sample has an unreliable spread, so the score is
+        regularized toward the population mean (58). Real case: this user's Jun 8
+        read 98% on a 4-night baseline (personal p90 is 90). Shrinkage pulls such
+        cold-start extremes in; a mature (trusted) baseline is left unshrunk."""
+        prov = BaselineState(55.0, 2.0, 4, 0, "provisional")   # n_valid=4 (just usable)
+        trusted = BaselineState(55.0, 2.0, 20, 0, "trusted")   # n_valid=20
+        rhr_prov = BaselineState(58.0, 2.0, 4, 0, "provisional")
+        rhr_trust = BaselineState(58.0, 2.0, 20, 0, "trusted")
+        hrv_high = 95.0  # far above the 55 ms baseline → extreme z
+
+        r_prov = recovery_score(hrv_high, 58.0, None, {"hrv": prov, "resting_hr": rhr_prov})
+        r_trust = recovery_score(hrv_high, 58.0, None, {"hrv": trusted, "resting_hr": rhr_trust})
+        assert r_prov is not None and r_trust is not None
+        # Trusted baseline → extreme score; provisional → shrunk well below it.
+        assert r_trust > 90.0, f"trusted extreme should be near-max, got {r_trust}"
+        assert r_prov < r_trust - 8.0, f"provisional {r_prov} should be shrunk vs trusted {r_trust}"
+        assert r_prov > RECOVERY_POPULATION_MEAN, "but still above population mean (real signal kept)"
+
     def test_trusted_state_returns_score(self):
         """14+ nights → 'trusted' → returns score."""
         nights = [55.0] * 20

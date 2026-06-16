@@ -70,7 +70,7 @@ import statistics
 from typing import Any, Mapping, Optional, Sequence
 
 from ._utils import to_epoch as _to_epoch
-from .baselines import BaselineState, METRIC_CFG
+from .baselines import BaselineState, METRIC_CFG, MIN_NIGHTS_SEED, MIN_NIGHTS_TRUST
 
 # ===========================================================================
 # Named thresholds — resting_hr
@@ -106,6 +106,19 @@ LOGISTIC_Z0: float = -0.20
 
 #: WHOOP-published population-average recovery (% ).  Used as the cold-start fallback.
 RECOVERY_POPULATION_MEAN: float = 58.0
+
+#: Provisional-baseline shrinkage floor. While the HRV baseline is provisional
+#: (MIN_NIGHTS_SEED ≤ n < MIN_NIGHTS_TRUST) its spread is estimated from very few
+#: nights and is unreliable, so a slightly-above-baseline value can blow up the
+#: z-score into a near-max recovery. We regularize (Bayesian shrinkage) the score
+#: toward RECOVERY_POPULATION_MEAN, weighting the personal score by
+#:   w = SHRINK_FLOOR + (1 - SHRINK_FLOOR) · (n − SEED)/(TRUST − SEED)
+#: so at n=SEED the personal score and the population prior are blended
+#: SHRINK_FLOOR:(1−SHRINK_FLOOR), ramping to full personal score at n=TRUST.
+#: This is generic regularization (shrink small-sample estimates toward the
+#: prior), NOT per-user tuning. Real case: this user's 98% on a 4-night baseline
+#: (personal p90=90) → ~78% after shrinkage.
+RECOVERY_SHRINK_FLOOR: float = 0.5
 
 #: Recovery band thresholds matching WHOOP color scheme (doc 03 §1.3).
 BAND_RED_MAX: float = 34.0    # Red  : [0, 34)
@@ -332,6 +345,17 @@ def recovery_score(
     # recovery = 100 / (1 + exp(-k * (Z - Z0)))
     # At Z=0: recovery ≈ 58% (WHOOP population average).
     score = 100.0 / (1.0 + math.exp(-LOGISTIC_K * (Z - LOGISTIC_Z0)))
+
+    # ── Provisional-baseline shrinkage ────────────────────────────────────────
+    # A thin HRV baseline (n < MIN_NIGHTS_TRUST) has an unreliable spread, so
+    # regularize the score toward the population mean. Only when the HRV baseline
+    # is a BaselineState (legacy float baselines opt out of cold-start handling).
+    if isinstance(raw_hrv_val, BaselineState) and raw_hrv_val.n_valid < MIN_NIGHTS_TRUST:
+        span = max(1, MIN_NIGHTS_TRUST - MIN_NIGHTS_SEED)
+        ramp = (raw_hrv_val.n_valid - MIN_NIGHTS_SEED) / span
+        ramp = min(1.0, max(0.0, ramp))
+        w = RECOVERY_SHRINK_FLOOR + (1.0 - RECOVERY_SHRINK_FLOOR) * ramp
+        score = w * score + (1.0 - w) * RECOVERY_POPULATION_MEAN
 
     # Clamp for floating-point safety (logistic is theoretically bounded but
     # extreme inputs could produce values just outside due to fp precision).
