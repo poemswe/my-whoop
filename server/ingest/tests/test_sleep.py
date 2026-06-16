@@ -495,6 +495,47 @@ class TestRespRateRRV:
         assert math.isnan(r) and math.isnan(v)
 
 
+class TestRespAndRRVFromRR:
+    """Respiratory rate + irregularity from RR-interval RSA — the working path
+    that re-enables REM detection (the raw resp channel is a flat aggregate)."""
+
+    @staticmethod
+    def _rr_window(resp_bpm, dur_s=300, mean_ms=900.0, amp_ms=40.0, jitter_ms=0.0, seed=0):
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        hz = resp_bpm / 60.0
+        rr, t = [], 0.0
+        while t < dur_s:
+            v = mean_ms + amp_ms * np.sin(2 * np.pi * hz * t)
+            if jitter_ms:
+                v += rng.uniform(-jitter_ms, jitter_ms)
+            rr.append(v); t += v / 1000.0
+        return rr
+
+    def test_recovers_rate_regular_breathing_low_entropy(self):
+        rate, irr = sf.resp_and_rrv_from_rr(self._rr_window(15.0))
+        assert rate == pytest.approx(15.0, abs=3.0)
+        assert 0.0 <= irr <= 1.0
+
+    def test_irregular_breathing_has_higher_entropy(self):
+        # Single clean RSA frequency → concentrated spectrum (low entropy).
+        _, irr_reg = sf.resp_and_rrv_from_rr(self._rr_window(15.0))
+        # Two mixed frequencies + jitter → spread spectrum (higher entropy).
+        import numpy as np
+        rr, t = [], 0.0
+        rng = np.random.default_rng(1)
+        while t < 300:
+            v = (900 + 25 * np.sin(2 * np.pi * 0.20 * t) + 25 * np.sin(2 * np.pi * 0.33 * t)
+                 + rng.uniform(-20, 20))
+            rr.append(v); t += v / 1000.0
+        _, irr_mix = sf.resp_and_rrv_from_rr(rr)
+        assert irr_mix > irr_reg, f"irregular {irr_mix} should exceed regular {irr_reg}"
+
+    def test_too_few_beats_nan(self):
+        r, v = sf.resp_and_rrv_from_rr([900.0] * 5)
+        assert math.isnan(r) and math.isnan(v)
+
+
 class TestDoGHRVariability:
     def test_flat_hr_yields_near_zero(self):
         out = sf.dog_hr_variability([60.0] * 40)

@@ -405,6 +405,66 @@ def resp_rate_and_rrv(resp_raw: Sequence[float], dt_s: float = 1.0) -> tuple[flo
     return rate, rrv
 
 
+# --- Respiratory rate + irregularity from RR-interval RSA (the working path) --
+# The raw resp channel is a flat aggregate on real WHOOP 4.0 data (see
+# units.resp_rate_nightly), so resp_rate_and_rrv above yields nothing useful.
+# Respiration is instead recovered from respiratory sinus arrhythmia in the RR
+# tachogram (heart speeds up on inhale, slows on exhale). For staging we want two
+# things per window: the respiratory RATE and an IRREGULARITY measure — REM
+# breathing is irregular (RSA power spread across the band → high spectral
+# entropy), deep/NREM breathing is regular (sharp peak → low entropy).
+
+#: Respiratory band (HF-HRV) for RSA — matches units._RSA_BAND_LO/HI.
+_RSA_BAND_LO: float = 0.15
+_RSA_BAND_HI: float = 0.40
+#: Min plausible RR (ms) and min beats for a trustworthy windowed RSA spectrum.
+_RSA_RR_MIN_MS: float = 300.0
+_RSA_RR_MAX_MS: float = 2000.0
+_RSA_MIN_BEATS: int = 30
+
+
+def resp_and_rrv_from_rr(rr_ms: Sequence[float], *, fs: float = 4.0) -> tuple[float, float]:
+    """Respiratory rate (brpm) + irregularity from a window of RR intervals (ms).
+
+    Reconstructs beat timing from the RR intervals themselves (each RR is the
+    inter-beat gap), resamples the tachogram to ``fs`` Hz, and takes the Welch
+    spectrum over the respiratory band. Returns:
+      rate         — band peak × 60 (breaths/min)
+      irregularity — normalized spectral entropy of the band in [0, 1]; HIGH when
+                     RSA power is spread (irregular breathing → REM), LOW when it
+                     is concentrated at one frequency (regular breathing → deep).
+
+    Returns (nan, nan) when there are too few beats / no usable RSA. The classifier
+    percentile-ranks irregularity within the night, so its absolute scale is moot.
+    """
+    nan = float("nan")
+    vals = [float(v) for v in rr_ms if _RSA_RR_MIN_MS <= float(v) <= _RSA_RR_MAX_MS]
+    if len(vals) < _RSA_MIN_BEATS:
+        return nan, nan
+    t = np.cumsum(vals) / 1000.0
+    t = t - t[0]
+    if t[-1] < 120.0:  # need >= 2 min of beats for a respiratory-band spectrum
+        return nan, nan
+
+    from scipy.signal import welch
+
+    grid = np.arange(0.0, t[-1], 1.0 / fs)
+    tach = np.interp(grid, t, vals)
+    tach = tach - np.mean(tach)
+    if np.allclose(tach, 0.0):
+        return nan, nan
+    nperseg = min(len(tach), int(60 * fs))
+    freqs, psd = welch(tach, fs=fs, nperseg=nperseg, noverlap=nperseg // 2)
+    band = (freqs >= _RSA_BAND_LO) & (freqs <= _RSA_BAND_HI)
+    pb = psd[band]
+    if not band.any() or pb.sum() <= 0.0:
+        return nan, nan
+    rate = float(freqs[band][int(np.argmax(pb))]) * 60.0
+    pn = pb / pb.sum()
+    entropy = float(-np.sum(pn * np.log(pn + 1e-12)) / np.log(len(pn)))
+    return rate, entropy
+
+
 # ===========================================================================
 # HRV from RR (neurokit2)
 # ===========================================================================
@@ -543,10 +603,15 @@ def extract_features(
                 win_rr.extend(grid.rr[j])
             hrv_cache = hrv_from_rr(win_rr)
 
-            win_resp: list[float] = []
-            for j in range(lo, hi):
-                win_resp.extend(grid.resp[j])
-            resp_cache = resp_rate_and_rrv(win_resp)
+            # Respiration from RR-interval RSA (the raw resp channel is a flat
+            # aggregate on real data). Falls back to the raw-channel estimator
+            # only when RSA yields nothing (e.g. a real resp waveform exists).
+            resp_cache = resp_and_rrv_from_rr(win_rr)
+            if math.isnan(resp_cache[0]):
+                win_resp: list[float] = []
+                for j in range(lo, hi):
+                    win_resp.extend(grid.resp[j])
+                resp_cache = resp_rate_and_rrv(win_resp)
 
         clock = min(1.0, max(0.0, (i - onset_idx) / span))
 
