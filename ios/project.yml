@@ -44,10 +44,6 @@ targets:
         WHOOP_DEVICE_ID: $(WHOOP_DEVICE_ID)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
-          NSExceptionDomains:
-            100.79.107.77:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSIncludesSubdomains: false
     dependencies:
       - package: WhoopProtocol
       - package: WhoopStore
