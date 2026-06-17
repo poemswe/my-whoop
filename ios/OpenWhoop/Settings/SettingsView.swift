@@ -103,6 +103,12 @@ struct SettingsView: View {
     @State private var saveStatus: SaveStatus = .idle
     @State private var isBackfilling = false
 
+    // High-frequency historical sync. Off by default: when ON, the strap is asked
+    // to enter high-freq-sync so it offloads type-47 biometric history (gravity,
+    // SpO2, resp, skin-temp) instead of returning CONSOLE_LOGS frames. Gravity is
+    // required for sleep detection, so this must be ON for overnight sleep to sync.
+    @AppStorage("useHighFreqBackfill") private var useHighFreqBackfill = false
+
     private enum SaveStatus: Equatable {
         case idle
         case saving
@@ -141,6 +147,7 @@ struct SettingsView: View {
                 sexSection
                 saveSection
                 healthSection
+                syncSection
                 footerSection
             }
             .scrollContentBackground(.hidden)
@@ -311,6 +318,17 @@ struct SettingsView: View {
             } else {
                 Text("Not synced yet").foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var syncSection: some View {
+        Section("Sync") {
+            Toggle("High-frequency history sync", isOn: $useHighFreqBackfill)
+            Text(useHighFreqBackfill
+                 ? "On — the strap offloads full biometric history (gravity, SpO2, respiration, skin temp). Required for overnight sleep detection. Reconnect the strap to apply."
+                 : "Off — only live HR/RR sync. Overnight sleep won't compute without gravity history. Turn on, then reconnect the strap.")
+                .font(WH.Font.caption)
+                .foregroundStyle(WH.Color.textSecondary)
         }
     }
 
