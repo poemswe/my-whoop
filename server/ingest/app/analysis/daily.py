@@ -405,7 +405,16 @@ def compute_day(conn, device_id: str, day: _dt.date) -> dict[str, Any]:
         hrv_res = _hrv.nightly_hrv(
             streams.get("rr") or [], merged_night,
             stages=merged_stages or None)
-        nightly_rmssd = hrv_res.get("rmssd")
+        # Use the WHOLE-NIGHT RMSSD, not the last-SWS tier. Validated against this
+        # user's WHOOP export: whole-night (~85 ms) matches their WHOOP HRV median
+        # (88), whereas the last-SWS window over-reads (97-114 ms) because it lands
+        # on short, noisy deep-sleep segments where parasympathetic RMSSD peaks.
+        # That over-read pinned recovery at +3σ (always green). Whole-night is also
+        # far more stable (4000+ beats vs a few hundred). Fall back to the tiered
+        # value only if whole-night is unavailable.
+        nightly_rmssd = hrv_res.get("rmssd_whole_night")
+        if nightly_rmssd is None or not math.isfinite(nightly_rmssd):
+            nightly_rmssd = hrv_res.get("rmssd")
         if nightly_rmssd is not None and math.isfinite(nightly_rmssd):
             avg_hrv = nightly_rmssd
 
